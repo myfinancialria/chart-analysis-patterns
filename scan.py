@@ -31,6 +31,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from detect import scan_symbol
+from breakouts import scan_extra
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent
@@ -164,29 +165,36 @@ def run_scan(df: pd.DataFrame, sectors: dict, args) -> pd.DataFrame:
         g = g.sort_values("date")
         if len(g) < 60:
             continue
-        p = scan_symbol(g["high"].values, g["low"].values, g["close"].values,
-                        g["volume"].values, min_conf=args.min_conf)
-        if p is None:
-            continue
-        row = {"symbol": sym, "sector": sectors.get(sym, "Unknown"),
-               "last_date": g["date"].iloc[-1], **p.as_row()}
-        results.append(row)
+        hi, lo, cl, vol = (g["high"].values, g["low"].values,
+                           g["close"].values, g["volume"].values)
+        last_date = g["date"].iloc[-1]
+        meta = {"symbol": sym, "sector": sectors.get(sym, "Unknown"),
+                "last_date": last_date}
+
+        # two-rail patterns (channels / triangles / wedges / rectangles)
+        p = scan_symbol(hi, lo, cl, vol, min_conf=args.min_conf)
+        if p is not None:
+            results.append({**meta, "category": "Pattern", "state": "Forming",
+                            **p.as_row()})
+
+        # single-line signals (S/R boxes, range breakouts, trendline breaks)
+        for sig in scan_extra(hi, lo, cl, vol, min_conf=args.min_conf):
+            results.append({**meta, **sig})
 
     if not results:
         return pd.DataFrame()
     out = pd.DataFrame(results)
-    # rank: triangles/wedges (tighter setups) above channels, then by confidence
-    setup_rank = {"Ascending triangle": 0, "Descending triangle": 0,
-                  "Symmetrical triangle": 0, "Rising wedge": 0, "Falling wedge": 0,
-                  "Ascending channel": 1, "Descending channel": 1,
-                  "Rectangle / Range": 2}
-    out["_rank"] = out["name"].map(lambda n: setup_rank.get(n, 3))
+    # breakouts first (most actionable), then patterns, then levels being tested
+    state_rank = {"Breakout": 0, "Breakdown": 0, "Forming": 1, "Testing": 2}
+    out["_rank"] = out["state"].map(lambda s: state_rank.get(s, 3))
     out = out.sort_values(["_rank", "confidence"], ascending=[True, False]).drop(columns="_rank")
     return out.reset_index(drop=True)
 
 
 # ---------------- charts ----------------
 def draw_montage(df: pd.DataFrame, candles: pd.DataFrame, top_n: int) -> Path | None:
+    # the montage draws two-rail patterns; breakouts/levels live on the dashboard
+    df = df[df["category"] == "Pattern"]
     if df.empty:
         return None
     import matplotlib
@@ -277,13 +285,13 @@ def main() -> int:
     latest = OUT_DIR / "patterns_latest.csv"
     out.to_csv(latest, index=False)
 
-    n_by = out["name"].value_counts()
-    print(f"\nFound {len(out)} patterns:")
-    for name, cnt in n_by.items():
-        print(f"  {name:<22} {cnt}")
-    print(f"\nTop setups:")
-    cols = ["symbol", "name", "bias", "confidence", "pct_to_upper", "pct_to_lower",
-            "vol_contraction"]
+    print(f"\nFound {len(out)} signals "
+          f"({(out['state'].isin(['Breakout', 'Breakdown'])).sum()} fresh breakouts):")
+    for name, cnt in out["name"].value_counts().items():
+        print(f"  {name:<26} {cnt}")
+    print(f"\nTop signals:")
+    cols = ["symbol", "category", "name", "bias", "state", "confidence",
+            "pct_to_upper", "pct_to_lower"]
     print(out[cols].head(15).to_string(index=False))
     print(f"\nCSV -> {csv_path}")
 

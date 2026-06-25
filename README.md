@@ -27,6 +27,21 @@ lines aren't wrongly rejected) → **classify** by slope + convergence → **sco
 (line fit 45% / touch count 30% / shape clarity 25%). Each stock is tried over
 60/90/130-bar lookbacks and the best-scoring window wins.
 
+### Single-line signals (`breakouts.py`)
+
+Alongside the two-rail patterns, the scan also flags single-line signals and tags
+each with a `state` (Breakout / Breakdown / Testing):
+
+| Signal | What it is |
+|---|---|
+| **Support / Resistance box** | A flat level tested ≥3× that price is currently testing |
+| **Range breakout / breakdown** | Price escaping a rectangle (flat support + resistance) |
+| **Trendline breakout / breakdown** | A single sloping line (down-line through highs / up-line through lows) that price has just broken |
+
+Breakouts are confirmed only if the cross happened within the last ~6 bars and price
+cleared the level by >0.3 ATR; breakout volume vs. the prior average is reported as a
+conviction flag. Fresh breakouts/breakdowns are ranked to the top of the output.
+
 ## Run
 
 ```bash
