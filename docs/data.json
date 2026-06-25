@@ -1,9 +1,9 @@
 {
   "as_of": "2026-06-25",
-  "built": "26 Jun 2026, 01:01 IST",
-  "total": 55,
+  "built": "26 Jun 2026, 01:08 IST",
+  "total": 56,
   "counts": {
-    "Ascending channel": 18,
+    "Ascending channel": 19,
     "Descending channel": 18,
     "Falling wedge": 5,
     "Rising wedge": 4,
@@ -283,6 +283,22 @@
       "vol_contraction": 0.53,
       "window": 60,
       "chart": "charts/RADICO.png",
+      "color": "#16a34a"
+    },
+    {
+      "symbol": "JSWDULUX",
+      "sector": "Consumer Durables",
+      "name": "Ascending channel",
+      "bias": "Up-trend",
+      "confidence": 0.77,
+      "close": 3199.1,
+      "to_upper": 3.7,
+      "to_lower": 3.4,
+      "upper": 3318.41,
+      "lower": 3091.43,
+      "vol_contraction": 1.46,
+      "window": 60,
+      "chart": "charts/JSWDULUX.png",
       "color": "#16a34a"
     },
     {
