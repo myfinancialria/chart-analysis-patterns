@@ -1,0 +1,63 @@
+name: Daily chart-pattern scan
+
+on:
+  schedule:
+    # 11:00 UTC = 16:30 IST, after NSE close (Mon–Fri). NSE holidays just re-run harmlessly.
+    - cron: "0 11 * * 1-5"
+  workflow_dispatch: {}   # allow manual runs from the Actions tab
+
+permissions:
+  contents: write          # needed to commit the rebuilt docs/ back to the repo
+
+concurrency:
+  group: daily-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Mint Fyers access token
+        env:
+          FYERS_CLIENT_ID: ${{ secrets.FYERS_CLIENT_ID }}
+          FYERS_SECRET:    ${{ secrets.FYERS_SECRET }}
+          FYERS_REDIRECT:  ${{ secrets.FYERS_REDIRECT }}
+          FYERS_FY_ID:     ${{ secrets.FYERS_FY_ID }}
+          FYERS_PIN:       ${{ secrets.FYERS_PIN }}
+          FYERS_TOTP_KEY:  ${{ secrets.FYERS_TOTP_KEY }}
+        run: python auto_login.py
+
+      - name: Run scan + build dashboard
+        env:
+          FYERS_CLIENT_ID: ${{ secrets.FYERS_CLIENT_ID }}
+        run: python scan.py --site --min-conf 0.55
+
+      - name: Commit updated dashboard
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs
+          if git diff --cached --quiet; then
+            echo "No dashboard changes."
+          else
+            git commit -m "Daily pattern scan — $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
+      - name: Upload dashboard artifact (private)
+        uses: actions/upload-artifact@v4
+        with:
+          name: chart-patterns-dashboard
+          path: docs/
+          retention-days: 14

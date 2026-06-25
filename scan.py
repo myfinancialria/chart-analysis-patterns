@@ -36,19 +36,42 @@ HERE = Path(__file__).parent
 ROOT = HERE.parent
 CACHE_DIR = HERE / "cache"
 OUT_DIR = HERE / "output"
-LIST_PATH = ROOT / "data" / "nifty500_list.csv"
-TOKEN_PATH = ROOT / "access_token.txt"
 
 CACHE_DIR.mkdir(exist_ok=True)
 OUT_DIR.mkdir(exist_ok=True)
 
-load_dotenv(ROOT / ".env")
+# Load env from the repo first, then the parent fyers-bot dir (local dev).
+for env in (HERE / ".env", ROOT / ".env"):
+    if env.exists():
+        load_dotenv(env)
+
+
+def _first_existing(*paths: Path) -> Path:
+    """Return the first path that exists, else the first candidate (for error msgs)."""
+    for p in paths:
+        if p.exists():
+            return p
+    return paths[0]
+
+
+# Symbol list + token resolve to the bundled repo copy first, parent dir as fallback.
+LIST_PATH = _first_existing(HERE / "data" / "nifty500_list.csv",
+                            ROOT / "data" / "nifty500_list.csv")
+TOKEN_PATH = _first_existing(HERE / "access_token.txt", ROOT / "access_token.txt")
 
 
 # ---------------- data ----------------
 def load_universe() -> pd.DataFrame:
     if not LIST_PATH.exists():
-        sys.exit(f"{LIST_PATH} not found — run backfill_nifty500.py once to fetch it.")
+        print("Symbol list missing — fetching NIFTY 500 list from NSE…")
+        import io
+        import requests
+        r = requests.get(
+            "https://archives.nseindia.com/content/indices/ind_nifty500list.csv",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+        r.raise_for_status()
+        LIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        pd.read_csv(io.StringIO(r.text)).to_csv(LIST_PATH, index=False)
     n500 = pd.read_csv(LIST_PATH)
     n500.columns = [c.strip() for c in n500.columns]
     return n500[["Symbol", "Industry"]].dropna().drop_duplicates("Symbol")
@@ -59,9 +82,11 @@ def fetch_history(symbols: list[str], days: int) -> pd.DataFrame:
     from fyers_apiv3 import fyersModel
 
     client_id = os.getenv("FYERS_CLIENT_ID")
-    if not TOKEN_PATH.exists():
-        sys.exit("access_token.txt not found — run login.py in the repo root first.")
-    token = TOKEN_PATH.read_text().strip()
+    token = os.getenv("FYERS_ACCESS_TOKEN") or (
+        TOKEN_PATH.read_text().strip() if TOKEN_PATH.exists() else "")
+    if not token:
+        sys.exit("No Fyers token — set FYERS_ACCESS_TOKEN, provide access_token.txt, "
+                 "or run auto_login.py first.")
     fyers = fyersModel.FyersModel(client_id=client_id, token=token, log_path="")
 
     prof = fyers.get_profile()
@@ -230,6 +255,7 @@ def main() -> int:
     ap.add_argument("--no-charts", action="store_true")
     ap.add_argument("--charts", type=int, default=12, help="how many setups to chart")
     ap.add_argument("--slack", action="store_true", help="post digest to Slack")
+    ap.add_argument("--site", action="store_true", help="build the docs/ dashboard")
     args = ap.parse_args()
 
     uni = load_universe()
@@ -266,6 +292,11 @@ def main() -> int:
         montage = draw_montage(out, candles, args.charts)
         if montage:
             print(f"Charts -> {montage}")
+
+    if args.site:
+        import build_site
+        idx = build_site.build(out, candles)
+        print(f"Site -> {idx}")
 
     if args.slack:
         import slack_post
