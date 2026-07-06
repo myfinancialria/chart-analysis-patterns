@@ -1,9 +1,10 @@
 """
 Build the static dashboard (docs/) from a completed scan.
 
-Renders one annotated candlestick chart per detected pattern and a single
-self-contained index.html (data embedded inline, charts referenced relatively)
-so it works opened straight from disk or served by any static host.
+Renders one annotated candlestick chart per detected pattern (white background,
+green up-days / red down-days, a daily-volume panel and a dated x-axis) plus a
+single self-contained index.html grouped by category, with a plain-language
+"can we take a trade?" note under every chart.
 
 Called by scan.py --site, or standalone:
     python build_site.py            # uses output/patterns_latest.csv + latest cache
@@ -25,12 +26,95 @@ CACHE_DIR = HERE / "cache"
 DOCS = HERE / "docs"
 CHARTS = DOCS / "charts"
 
-BIAS_COLOR = {"Bullish": "#16a34a", "Bearish": "#dc2626", "Neutral": "#64748b",
-              "Up-trend": "#16a34a", "Down-trend": "#dc2626"}
+UP, DOWN = "#16a34a", "#dc2626"          # green up-day, red down-day
+BIAS_COLOR = {"Bullish": UP, "Bearish": DOWN, "Neutral": "#64748b",
+              "Up-trend": UP, "Down-trend": DOWN}
+
+# category -> friendly section title (order controls how sections stack)
+CATEGORIES = [
+    ("Pattern", "Chart Patterns"),
+    ("Level", "Support / Resistance"),
+    ("Range", "Ranges"),
+    ("Trendline", "Trendlines"),
+]
+
+# verdict -> pill colour on the site
+VERDICT_COLOR = {
+    "Tradeable": "#16a34a",
+    "Watch": "#d97706",
+    "Avoid longs": "#dc2626",
+    "No trade yet": "#64748b",
+}
 
 
 def _nan(v):
     return v is None or (isinstance(v, float) and np.isnan(v))
+
+
+def _human_vol(v) -> str:
+    """Indian-style short volume: 1.2 Cr / 3.4 L / 56.7K."""
+    if v is None or _nan(v):
+        return "—"
+    v = float(v)
+    if v >= 1e7:
+        return f"{v / 1e7:.2f} Cr"
+    if v >= 1e5:
+        return f"{v / 1e5:.2f} L"
+    if v >= 1e3:
+        return f"{v / 1e3:.1f}K"
+    return f"{int(v)}"
+
+
+def _trade_note(row: pd.Series) -> tuple[str, str]:
+    """Plain-language read on whether the setup is actionable yet.
+
+    Returns (verdict, sentence). Educational only — descriptive, not advice.
+    """
+    state = str(row.get("state", "Forming"))
+    bias = str(row.get("bias", ""))
+    conf = float(row.get("confidence", 0) or 0)
+    vs = row.get("vol_surge")
+    vs = None if _nan(vs) else float(vs)
+    bull = bias in ("Bullish", "Up-trend")
+    bear = bias in ("Bearish", "Down-trend")
+
+    if state == "Breakout":
+        if conf >= 0.70 and vs and vs >= 1.5:
+            return ("Tradeable",
+                    f"Fresh breakout confirmed on {vs:.1f}× average volume. A long "
+                    "can be considered on a close above the breakout level, with a "
+                    "stop just below the base and risk kept to ~1–2% of capital.")
+        if vs and vs >= 1.2:
+            return ("Watch",
+                    "Breakout underway but volume is only moderate — wait for a "
+                    "decisive close above the level before committing.")
+        return ("Watch",
+                "Breakout not yet backed by a clear volume surge — treat as "
+                "tentative and wait for confirmation.")
+
+    if state == "Breakdown":
+        return ("Avoid longs",
+                "Support has given way — no fresh long here. Only aggressive "
+                "traders short a weak pullback, with a stop above the broken level.")
+
+    if state == "Testing":
+        edge = "resistance" if not bear else "support"
+        return ("Watch",
+                f"Price is pressing {edge} — no trade yet. Set an alert and act only "
+                "on a confirmed break backed by higher volume.")
+
+    # Forming
+    if bull:
+        return ("No trade yet",
+                "Constructive pattern still forming — not actionable. Wait for an "
+                "upside breakout with a volume surge before considering a long.")
+    if bear:
+        return ("No trade yet",
+                "Weak pattern still forming — avoid. A breakdown would confirm more "
+                "downside; there is no long setup here.")
+    return ("No trade yet",
+            "Pattern still developing with no clear edge — stand aside until it "
+            "resolves into a breakout or breakdown.")
 
 
 def _render_chart(symbol: str, g: pd.DataFrame, row: pd.Series, path: Path) -> None:
@@ -40,53 +124,81 @@ def _render_chart(symbol: str, g: pd.DataFrame, row: pd.Series, path: Path) -> N
 
     g = g.sort_values("date").tail(int(row["window"]))
     o, h, l, c = (g[k].values for k in ("open", "high", "low", "close"))
+    vol = g["volume"].values if "volume" in g else np.zeros(len(c))
+    dates = pd.to_datetime(g["date"]).dt.strftime("%d %b").values
     x = np.arange(len(c))
     category = row.get("category", "Pattern")
 
-    fig, ax = plt.subplots(figsize=(5.4, 3.0))
+    fig, (ax, axv) = plt.subplots(
+        2, 1, figsize=(5.8, 3.9), sharex=True, constrained_layout=True,
+        gridspec_kw={"height_ratios": [3.1, 1], "hspace": 0.06})
+
+    # ---- price candles ----
     for j in range(len(c)):
-        up = c[j] >= o[j]
-        col = "#16a34a" if up else "#dc2626"
-        ax.vlines(j, l[j], h[j], color="#9aa4b2", linewidth=0.5, zorder=1)
-        ax.vlines(j, o[j], c[j], color=col, linewidth=2.0, zorder=2)
+        col = UP if c[j] >= o[j] else DOWN
+        ax.vlines(j, l[j], h[j], color=col, linewidth=0.6, zorder=1, alpha=0.55)
+        ax.vlines(j, o[j], c[j], color=col, linewidth=2.1, zorder=2)
 
     xe = np.array([0, len(c) - 1])
     if category in ("Level", "Range"):
-        # horizontal support / resistance boxes
         res, sup = row.get("res_level"), row.get("sup_level")
         if not _nan(res):
-            ax.axhline(res, ls="--", color="#dc2626", lw=1.4)
+            ax.axhline(res, ls="--", color=DOWN, lw=1.3)
         if not _nan(sup):
-            ax.axhline(sup, ls="--", color="#16a34a", lw=1.4)
+            ax.axhline(sup, ls="--", color=UP, lw=1.3)
         if not _nan(res) and not _nan(sup):
             ax.axhspan(sup, res, color="#3b82f6", alpha=0.06)
     elif category == "Trendline" and not _nan(row.get("tl_slope")):
-        # single sloping trendline that price has broken
         line = row["tl_slope"] * x + row["tl_intercept"]
-        ax.plot(x, line, "--", color="#f59e0b", lw=1.5)
-        ax.scatter([len(c) - 1], [c[-1]], s=46, color="#f59e0b",
-                   marker="*", zorder=4)  # break point
+        ax.plot(x, line, "--", color="#d97706", lw=1.4)
+        ax.scatter([len(c) - 1], [c[-1]], s=44, color="#d97706", marker="*", zorder=4)
     else:
-        # two-rail patterns: fit upper/lower rails through the pivots
         hi_idx = find_pivots(h, 3, hi=True)
         lo_idx = find_pivots(l, 3, hi=False)
         if len(hi_idx) >= 2 and len(lo_idx) >= 2:
             su, iu = np.polyfit(hi_idx, h[hi_idx], 1)
             sl, il = np.polyfit(lo_idx, l[lo_idx], 1)
-            ax.plot(xe, su * xe + iu, "--", color="#dc2626", lw=1.3)
-            ax.plot(xe, sl * xe + il, "--", color="#16a34a", lw=1.3)
-            ax.scatter(hi_idx, h[hi_idx], s=12, color="#dc2626", zorder=3)
-            ax.scatter(lo_idx, l[lo_idx], s=12, color="#16a34a", zorder=3)
+            ax.plot(xe, su * xe + iu, "--", color=DOWN, lw=1.2)
+            ax.plot(xe, sl * xe + il, "--", color=UP, lw=1.2)
+            ax.scatter(hi_idx, h[hi_idx], s=11, color=DOWN, zorder=3)
+            ax.scatter(lo_idx, l[lo_idx], s=11, color=UP, zorder=3)
 
-    ax.set_title(f"{symbol} — {row['name']}", fontsize=10, color="#e5e7eb")
-    ax.set_xticks([])
-    ax.tick_params(axis="y", labelsize=7, colors="#9aa4b2")
-    for s in ax.spines.values():
-        s.set_color("#334155")
-    fig.patch.set_facecolor("#0f172a")
-    ax.set_facecolor("#0f172a")
-    fig.tight_layout()
-    fig.savefig(path, dpi=110, facecolor="#0f172a", bbox_inches="tight")
+    ax.set_title(f"{symbol} — {row['name']}", fontsize=10, color="#111827",
+                 fontweight="bold")
+    ax.set_ylabel("Price ₹", fontsize=7.5, color="#374151")
+    ax.grid(axis="y", color="#eef2f7", lw=0.8, zorder=0)
+    ax.tick_params(axis="y", labelsize=7, colors="#6b7280")
+    ax.tick_params(axis="x", length=0)
+
+    # ---- volume panel ----
+    vcol = [UP if c[j] >= o[j] else DOWN for j in range(len(c))]
+    axv.bar(x, vol, color=vcol, width=0.72, alpha=0.85, zorder=2)
+    axv.set_ylabel("Vol", fontsize=7.5, color="#374151")
+    axv.grid(axis="y", color="#eef2f7", lw=0.8, zorder=0)
+    axv.tick_params(axis="y", labelsize=6, colors="#9ca3af")
+    axv.yaxis.set_major_formatter(plt.FuncFormatter(
+        lambda y, _: _human_vol(y) if y > 0 else ""))
+
+    # ---- dated x-axis (on the bottom/volume panel) ----
+    n = len(x)
+    step = max(1, n // 6)
+    ticks = list(range(0, n, step))
+    if ticks[-1] != n - 1:
+        ticks.append(n - 1)
+    axv.set_xticks(ticks)
+    axv.set_xticklabels([dates[i] for i in ticks], fontsize=6.5, color="#6b7280",
+                        rotation=0)
+    axv.set_xlim(-0.8, n - 0.2)
+
+    for a in (ax, axv):
+        a.set_facecolor("#ffffff")
+        for s in a.spines.values():
+            s.set_color("#d1d5db")
+        a.spines["top"].set_visible(False)
+        a.spines["right"].set_visible(False)
+
+    fig.patch.set_facecolor("#ffffff")
+    fig.savefig(path, dpi=115, facecolor="#ffffff", bbox_inches="tight")
     plt.close(fig)
 
 
@@ -115,9 +227,16 @@ def build(df: pd.DataFrame | None = None, candles: pd.DataFrame | None = None) -
             continue
         chart = f"charts/{r['symbol']}.png"
         _render_chart(r["symbol"], g, r, DOCS / chart)
+
         def num(key, nd=1):
             v = r.get(key)
             return None if pd.isna(v) else round(float(v), nd)
+
+        gs = g.sort_values("date")
+        vol_last = int(gs["volume"].iloc[-1]) if "volume" in gs else None
+        vol_avg = (int(gs["volume"].tail(20).mean())
+                   if "volume" in gs and len(gs) else None)
+        verdict, note = _trade_note(r)
 
         records.append({
             "symbol": r["symbol"], "sector": r.get("sector", ""),
@@ -129,8 +248,11 @@ def build(df: pd.DataFrame | None = None, candles: pd.DataFrame | None = None) -
             "to_upper": num("pct_to_upper"), "to_lower": num("pct_to_lower"),
             "vol_contraction": num("vol_contraction", 2),
             "vol_surge": num("vol_surge", 2),
+            "volume": vol_last, "vol_avg": vol_avg,
             "window": int(r["window"]), "chart": chart,
             "color": BIAS_COLOR.get(r["bias"], "#64748b"),
+            "verdict": verdict, "note": note,
+            "vcolor": VERDICT_COLOR.get(verdict, "#64748b"),
         })
 
     ist = timezone(timedelta(hours=5, minutes=30))
@@ -139,11 +261,13 @@ def build(df: pd.DataFrame | None = None, candles: pd.DataFrame | None = None) -
     counts = df["name"].value_counts().to_dict()
 
     breakouts = sum(1 for r in records if r["state"] in ("Breakout", "Breakdown"))
+    tradeable = sum(1 for r in records if r["verdict"] == "Tradeable")
     meta = {
         "as_of": last_date,
         "built": built.strftime("%d %b %Y, %H:%M IST"),
         "total": len(records),
         "breakouts": breakouts,
+        "tradeable": tradeable,
         "counts": counts,
         "rows": records,
     }
@@ -155,39 +279,45 @@ def build(df: pd.DataFrame | None = None, candles: pd.DataFrame | None = None) -
 
 def _html(meta: dict) -> str:
     data_json = json.dumps(meta)
+    cats_json = json.dumps(CATEGORIES)
     chips = "".join(
         f'<span class="chip">{n}<b>{c}</b></span>' for n, c in meta["counts"].items())
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
 <title>NIFTY 500 Chart Patterns</title>
 <style>
-:root{{--bg:#0b1220;--card:#0f172a;--line:#1e293b;--mut:#94a3b8;--fg:#e5e7eb}}
+:root{{--bg:#ffffff;--card:#ffffff;--line:#e5e7eb;--mut:#6b7280;--fg:#111827;
+  --soft:#f9fafb;--up:#16a34a;--down:#dc2626}}
 *{{box-sizing:border-box}}
 body{{margin:0;background:var(--bg);color:var(--fg);
   font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}}
-header{{padding:22px 20px 8px;max-width:1280px;margin:0 auto}}
-h1{{margin:0 0 4px;font-size:22px}}
+header{{padding:24px 20px 8px;max-width:1320px;margin:0 auto}}
+h1{{margin:0 0 4px;font-size:23px}}
 .sub{{color:var(--mut);font-size:13px}}
 .chips{{margin:12px 0;display:flex;flex-wrap:wrap;gap:8px}}
-.chip{{background:var(--card);border:1px solid var(--line);border-radius:999px;
+.chip{{background:var(--soft);border:1px solid var(--line);border-radius:999px;
   padding:4px 11px;font-size:12px;color:var(--mut)}}
 .chip b{{color:var(--fg);margin-left:6px}}
-.chip.hot{{background:#1e293b;border-color:#f59e0b;color:#fbbf24}}
-.card.brk{{border-color:#f59e0b}}
+.chip.hot{{background:#fff7ed;border-color:#fdba74;color:#c2410c}}
+.chip.go{{background:#f0fdf4;border-color:#86efac;color:#15803d}}
 .tag{{font-size:10px;font-weight:700;padding:1px 7px;border-radius:999px;
-  background:#334155;color:#cbd5e1;margin-left:6px}}
-.tag.brk{{background:#f59e0b;color:#0b1220}}
-.bar{{max-width:1280px;margin:0 auto;padding:0 20px;display:flex;flex-wrap:wrap;
+  background:#eef2f7;color:#475569;margin-left:6px}}
+.tag.brk{{background:#f59e0b;color:#fff}}
+.bar{{max-width:1320px;margin:0 auto;padding:0 20px;display:flex;flex-wrap:wrap;
   gap:8px;align-items:center}}
-input,select{{background:var(--card);border:1px solid var(--line);color:var(--fg);
+input,select{{background:#fff;border:1px solid var(--line);color:var(--fg);
   border-radius:8px;padding:8px 10px;font-size:14px}}
-.grid{{max-width:1280px;margin:14px auto 60px;padding:0 20px;display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px}}
+.catwrap{{max-width:1320px;margin:0 auto;padding:0 20px}}
+h2.cat{{font-size:15px;margin:26px 0 2px;padding-bottom:6px;
+  border-bottom:2px solid var(--line);display:flex;align-items:baseline;gap:8px}}
+h2.cat span{{font-size:12px;color:var(--mut);font-weight:500}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));
+  gap:16px;margin:14px 0 8px}}
 .card{{background:var(--card);border:1px solid var(--line);border-radius:14px;
-  overflow:hidden;display:flex;flex-direction:column}}
-.card img{{width:100%;display:block;background:#0f172a}}
+  overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(0,0,0,.04)}}
+.card.brk{{border-color:#f59e0b}}
+.card img{{width:100%;display:block;background:#fff}}
 .meta{{padding:11px 13px}}
 .row1{{display:flex;justify-content:space-between;align-items:baseline;gap:8px}}
 .sym{{font-weight:700;font-size:16px}}
@@ -195,64 +325,75 @@ input,select{{background:var(--card);border:1px solid var(--line);color:var(--fg
 .pat{{color:var(--mut);font-size:12.5px;margin:3px 0 8px}}
 .stats{{display:flex;gap:14px;font-size:12px;color:var(--mut);flex-wrap:wrap}}
 .stats b{{color:var(--fg)}}
-.conf{{height:5px;background:var(--line);border-radius:3px;margin-top:9px;overflow:hidden}}
+.conf{{height:5px;background:var(--line);border-radius:3px;margin:9px 0 0;overflow:hidden}}
 .conf>i{{display:block;height:100%;background:#3b82f6}}
-footer{{max-width:1280px;margin:0 auto;padding:18px 20px 50px;color:var(--mut);
+.note{{margin:10px 0 0;padding:9px 11px;background:var(--soft);border:1px solid var(--line);
+  border-radius:9px;font-size:12.5px;line-height:1.45;color:#374151}}
+.verdict{{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.02em;
+  text-transform:uppercase;padding:2px 8px;border-radius:999px;color:#fff;margin-bottom:5px}}
+footer{{max-width:1320px;margin:0 auto;padding:22px 20px 60px;color:var(--mut);
   font-size:11.5px;border-top:1px solid var(--line)}}
-.dim{{color:#64748b}}
+.dim{{color:#9ca3af}}
+.empty{{color:#9ca3af;padding:8px 0}}
 </style></head><body>
 <header>
-  <h1>NIFTY 500 — Chart Patterns</h1>
-  <div class="sub">Daily EOD · patterns, S/R boxes &amp; breakouts · as of <b id="asof"></b>
+  <h1>NIFTY 500 — Daily Chart Patterns</h1>
+  <div class="sub">Daily EOD scan · patterns, S/R boxes &amp; breakouts, with daily
+    volume and a trade read on each · as of <b id="asof"></b>
     <span class="dim">· built <span id="built"></span></span></div>
-  <div class="chips"><span class="chip hot">⚡ Fresh breakouts<b id="bocount"></b></span>{chips}</div>
+  <div class="chips">
+    <span class="chip go">✅ Tradeable now<b id="tcount"></b></span>
+    <span class="chip hot">⚡ Fresh breakouts<b id="bocount"></b></span>{chips}</div>
 </header>
 <div class="bar">
   <input id="q" placeholder="Search symbol / sector…" style="flex:1;min-width:180px">
-  <select id="fcat"><option value="">All types</option>
-    <option value="Pattern">Patterns</option><option value="Level">S/R boxes</option>
-    <option value="Range">Ranges</option><option value="Trendline">Trendlines</option></select>
   <select id="fstate"><option value="">Any state</option>
     <option value="Breakout">Breakout</option><option value="Breakdown">Breakdown</option>
     <option value="Forming">Forming</option><option value="Testing">Testing</option></select>
+  <select id="fverdict"><option value="">Any verdict</option>
+    <option value="Tradeable">Tradeable</option><option value="Watch">Watch</option>
+    <option value="Avoid longs">Avoid longs</option><option value="No trade yet">No trade yet</option></select>
   <select id="fpat"><option value="">All names</option></select>
   <select id="fbias"><option value="">All bias</option></select>
   <select id="sort">
     <option value="confidence">Sort: confidence</option>
     <option value="to_upper">Sort: nearest resistance</option>
     <option value="to_lower">Sort: nearest support</option>
+    <option value="volume">Sort: volume</option>
     <option value="symbol">Sort: symbol</option>
   </select>
 </div>
-<div class="grid" id="grid"></div>
+<div class="catwrap" id="cats"></div>
 <footer>
-  <b>Educational / internal use only.</b> This is a descriptive geometric scan of
+  <b>Educational / informational only.</b> This is a descriptive geometric scan of
   historical price action — not investment advice, not a buy/sell recommendation,
-  and not a price forecast. Prepared by a person who is <b>not</b> a SEBI-registered
-  Research Analyst or Investment Adviser. Chart patterns fail often. Source: Fyers daily candles.
+  and not a price forecast. The trade notes are automated, rule-based observations
+  about setup readiness, not personalised advice. Prepared by a person who is
+  <b>not</b> a SEBI-registered Research Analyst or Investment Adviser. Chart patterns
+  fail often; always do your own research and manage risk. Source: Fyers daily candles.
 </footer>
 <script>
 const M = {data_json};
+const CATS = {cats_json};
 document.getElementById('asof').textContent = M.as_of;
 document.getElementById('built').textContent = M.built;
 document.getElementById('bocount').textContent = M.breakouts;
-const grid = document.getElementById('grid');
+document.getElementById('tcount').textContent = M.tradeable;
+const cats = document.getElementById('cats');
 const pats = [...new Set(M.rows.map(r=>r.name))].sort();
 const biases = [...new Set(M.rows.map(r=>r.bias))].sort();
 const fp = document.getElementById('fpat'), fb = document.getElementById('fbias');
 pats.forEach(p=>fp.add(new Option(p,p)));
 biases.forEach(b=>fb.add(new Option(b,b)));
 const pct = v => v==null ? '—' : (v>=0?'+':'')+v+'%';
+const vol = v => v==null ? '—' : v>=1e7?(v/1e7).toFixed(2)+' Cr'
+  : v>=1e5?(v/1e5).toFixed(2)+' L' : v>=1e3?(v/1e3).toFixed(1)+'K' : v;
 const isBrk = r => r.state==='Breakout' || r.state==='Breakdown';
 
 function card(r){{
-  let extra='';
-  if(isBrk(r) && r.vol_surge!=null)
-    extra=`<span title="breakout volume vs avg">· vol ×${{r.vol_surge}}</span>`;
-  else if(r.vol_contraction!=null && r.vol_contraction<0.8)
-    extra=`<span title="volume contracting">· vol ↓ ${{r.vol_contraction}}</span>`;
   const tag = r.state!=='Forming'
     ? `<span class="tag ${{isBrk(r)?'brk':''}}">${{isBrk(r)?'⚡ ':''}}${{r.state}}</span>` : '';
+  const volx = r.vol_avg ? ` <span class="dim">(avg ${{vol(r.vol_avg)}})</span>` : '';
   return `<div class="card ${{isBrk(r)?'brk':''}}">
     <img loading="lazy" src="${{r.chart}}" alt="${{r.symbol}} ${{r.name}}">
     <div class="meta">
@@ -261,27 +402,35 @@ function card(r){{
       <div class="pat">${{r.name}}${{tag}} · <span class="dim">${{r.sector}}</span></div>
       <div class="stats">
         <span>₹<b>${{r.close.toLocaleString('en-IN')}}</b></span>
+        <span>vol <b>${{vol(r.volume)}}</b>${{volx}}</span>
         <span>resist <b>${{pct(r.to_upper)}}</b></span>
         <span>support <b>${{pct(r.to_lower)}}</b></span>
-        ${{extra}}
       </div>
       <div class="conf"><i style="width:${{Math.round(r.confidence*100)}}%"></i></div>
+      <div class="note"><span class="verdict" style="background:${{r.vcolor}}">${{r.verdict}}</span><br>${{r.note}}</div>
     </div></div>`;
 }}
 function render(){{
   const q=document.getElementById('q').value.toLowerCase();
   const p=fp.value, b=fb.value, s=document.getElementById('sort').value;
-  const cat=document.getElementById('fcat').value, st=document.getElementById('fstate').value;
+  const st=document.getElementById('fstate').value;
+  const vd=document.getElementById('fverdict').value;
   let rows=M.rows.filter(r=>(!p||r.name===p)&&(!b||r.bias===b)&&
-    (!cat||r.category===cat)&&(!st||r.state===st)&&
+    (!st||r.state===st)&&(!vd||r.verdict===vd)&&
     (!q||r.symbol.toLowerCase().includes(q)||(r.sector||'').toLowerCase().includes(q)));
-  const key=r=> r[s]==null ? Infinity : r[s];
+  const key=r=> r[s]==null ? -Infinity : r[s];
   rows.sort((a,z)=> s==='symbol' ? a.symbol.localeCompare(z.symbol)
-    : s==='confidence' ? z.confidence-a.confidence : key(a)-key(z));
-  grid.innerHTML = rows.map(card).join('') ||
-    '<p class="dim">No signals match.</p>';
+    : (s==='confidence'||s==='volume') ? key(z)-key(a) : key(a)-key(z));
+  let html='';
+  for(const [cat,title] of CATS){{
+    const rs=rows.filter(r=>r.category===cat);
+    if(!rs.length) continue;
+    html+=`<h2 class="cat">${{title}} <span>${{rs.length}} chart${{rs.length>1?'s':''}}</span></h2>`
+      +`<div class="grid">${{rs.map(card).join('')}}</div>`;
+  }}
+  cats.innerHTML = html || '<p class="empty">No signals match your filters.</p>';
 }}
-['q','fcat','fstate','fpat','fbias','sort'].forEach(id=>
+['q','fstate','fverdict','fpat','fbias','sort'].forEach(id=>
   document.getElementById(id).addEventListener('input',render));
 render();
 </script></body></html>"""
