@@ -12,6 +12,7 @@ Called by scan.py --site, or standalone:
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 
@@ -25,6 +26,10 @@ OUT_DIR = HERE / "output"
 CACHE_DIR = HERE / "cache"
 DOCS = HERE / "docs"
 CHARTS = DOCS / "charts"
+HISTORY = DOCS / "history"
+KEEP_DAYS = 90                    # retain this many daily snapshots
+
+SCREENER = "https://www.screener.in/company/{sym}/"   # company / fundamentals / financials
 
 UP, DOWN = "#16a34a", "#dc2626"          # green up-day, red down-day
 BIAS_COLOR = {"Bullish": UP, "Bearish": DOWN, "Neutral": "#64748b",
@@ -271,10 +276,40 @@ def build(df: pd.DataFrame | None = None, candles: pd.DataFrame | None = None) -
         "counts": counts,
         "rows": records,
     }
+
+    # --- daily archive: snapshot this scan under history/<date>/, keep 90 days ---
+    dates = _archive(meta, str(last_date))
+    meta["dates"] = dates
+
     (DOCS / "data.json").write_text(json.dumps(meta, indent=2))
     (DOCS / "index.html").write_text(_html(meta))
     (DOCS / ".nojekyll").write_text("")
     return DOCS / "index.html"
+
+
+def _archive(meta: dict, day: str) -> list[str]:
+    """Snapshot today's data.json + charts into history/<day>/, prune >KEEP_DAYS.
+
+    Returns the list of available snapshot dates (newest first) for the date filter.
+    """
+    HISTORY.mkdir(exist_ok=True)
+    snap = HISTORY / day
+    scharts = snap / "charts"
+    scharts.mkdir(parents=True, exist_ok=True)
+    for old in scharts.glob("*.png"):
+        old.unlink()
+    for png in CHARTS.glob("*.png"):
+        shutil.copy2(png, scharts / png.name)
+    (snap / "data.json").write_text(json.dumps(meta))
+
+    # prune: keep only the newest KEEP_DAYS snapshots (ISO names sort chronologically)
+    snaps = sorted((d for d in HISTORY.iterdir() if d.is_dir()), reverse=True)
+    for d in snaps[KEEP_DAYS:]:
+        shutil.rmtree(d, ignore_errors=True)
+
+    dates = [d.name for d in sorted(HISTORY.iterdir(), reverse=True) if d.is_dir()]
+    (HISTORY / "manifest.json").write_text(json.dumps({"dates": dates}))
+    return dates
 
 
 def _html(meta: dict) -> str:
@@ -331,6 +366,11 @@ h2.cat span{{font-size:12px;color:var(--mut);font-weight:500}}
   border-radius:9px;font-size:12.5px;line-height:1.45;color:#374151}}
 .verdict{{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.02em;
   text-transform:uppercase;padding:2px 8px;border-radius:999px;color:#fff;margin-bottom:5px}}
+a.symlink{{color:#15803d;text-decoration:none;font-weight:700;font-size:16px}}
+a.symlink:hover{{text-decoration:underline}}
+.fund{{margin-top:8px;font-size:12px}}
+.fund a{{color:#2563eb;text-decoration:none;font-weight:600}}
+.fund a:hover{{text-decoration:underline}}
 footer{{max-width:1320px;margin:0 auto;padding:22px 20px 60px;color:var(--mut);
   font-size:11.5px;border-top:1px solid var(--line)}}
 .dim{{color:#9ca3af}}
@@ -347,6 +387,7 @@ footer{{max-width:1320px;margin:0 auto;padding:22px 20px 60px;color:var(--mut);
 </header>
 <div class="bar">
   <input id="q" placeholder="Search symbol / sector…" style="flex:1;min-width:180px">
+  <select id="fdate" title="Scan date"></select>
   <select id="fstate"><option value="">Any state</option>
     <option value="Breakout">Breakout</option><option value="Breakdown">Breakdown</option>
     <option value="Forming">Forming</option><option value="Testing">Testing</option></select>
@@ -375,29 +416,67 @@ footer{{max-width:1320px;margin:0 auto;padding:22px 20px 60px;color:var(--mut);
 <script>
 const M = {data_json};
 const CATS = {cats_json};
-document.getElementById('asof').textContent = M.as_of;
+const SCREENER = "https://www.screener.in/company/";
 document.getElementById('built').textContent = M.built;
-document.getElementById('bocount').textContent = M.breakouts;
-document.getElementById('tcount').textContent = M.tradeable;
 const cats = document.getElementById('cats');
-const pats = [...new Set(M.rows.map(r=>r.name))].sort();
-const biases = [...new Set(M.rows.map(r=>r.bias))].sort();
 const fp = document.getElementById('fpat'), fb = document.getElementById('fbias');
-pats.forEach(p=>fp.add(new Option(p,p)));
-biases.forEach(b=>fb.add(new Option(b,b)));
+const fd = document.getElementById('fdate');
 const pct = v => v==null ? '—' : (v>=0?'+':'')+v+'%';
 const vol = v => v==null ? '—' : v>=1e7?(v/1e7).toFixed(2)+' Cr'
   : v>=1e5?(v/1e5).toFixed(2)+' L' : v>=1e3?(v/1e3).toFixed(1)+'K' : v;
 const isBrk = r => r.state==='Breakout' || r.state==='Breakdown';
 
+// current view: rows for the selected date + the path prefix for its charts
+let CUR = M.rows, BASE = '';
+
+// date picker — newest first; latest === M.as_of uses the inlined data
+(M.dates && M.dates.length ? M.dates : [M.as_of]).forEach(d=>
+  fd.add(new Option(d===M.as_of ? d+' (latest)' : d, d)));
+fd.value = M.as_of;
+
+async function loadDate(d){{
+  if(d===M.as_of){{ CUR=M.rows; BASE=''; }}
+  else {{
+    try{{
+      const res=await fetch(`history/${{d}}/data.json`,{{cache:'no-store'}});
+      const j=await res.json(); CUR=j.rows||[]; BASE=`history/${{d}}/`;
+    }}catch(e){{ CUR=[]; BASE=''; }}
+  }}
+  refreshFilters();
+  document.getElementById('asof').textContent = d;
+  document.getElementById('bocount').textContent =
+    CUR.filter(r=>r.state==='Breakout'||r.state==='Breakdown').length;
+  document.getElementById('tcount').textContent =
+    CUR.filter(r=>r.verdict==='Tradeable').length;
+  render();
+}}
+function refreshFilters(){{
+  const pv=fp.value, bv=fb.value;
+  fp.innerHTML='<option value="">All names</option>';
+  fb.innerHTML='<option value="">All bias</option>';
+  [...new Set(CUR.map(r=>r.name))].sort().forEach(p=>fp.add(new Option(p,p)));
+  [...new Set(CUR.map(r=>r.bias))].sort().forEach(b=>fb.add(new Option(b,b)));
+  if([...fp.options].some(o=>o.value===pv)) fp.value=pv;
+  if([...fb.options].some(o=>o.value===bv)) fb.value=bv;
+}}
+
 function card(r){{
   const tag = r.state!=='Forming'
     ? `<span class="tag ${{isBrk(r)?'brk':''}}">${{isBrk(r)?'⚡ ':''}}${{r.state}}</span>` : '';
   const volx = r.vol_avg ? ` <span class="dim">(avg ${{vol(r.vol_avg)}})</span>` : '';
+  const url = SCREENER + encodeURIComponent(r.symbol) + '/';
+  const tradeable = r.verdict==='Tradeable';
+  // tradeable symbols link out to company / fundamentals / financials
+  const sym = tradeable
+    ? `<a class="sym symlink" href="${{url}}" target="_blank" rel="noopener">${{r.symbol}} ↗</a>`
+    : `<span class="sym">${{r.symbol}}</span>`;
+  const fund = tradeable
+    ? `<div class="fund"><a href="${{url}}" target="_blank" rel="noopener">📊 Company, fundamentals &amp; financials · industry overview ↗</a></div>`
+    : '';
   return `<div class="card ${{isBrk(r)?'brk':''}}">
-    <img loading="lazy" src="${{r.chart}}" alt="${{r.symbol}} ${{r.name}}">
+    <img loading="lazy" src="${{BASE}}${{r.chart}}" alt="${{r.symbol}} ${{r.name}}">
     <div class="meta">
-      <div class="row1"><span class="sym">${{r.symbol}}</span>
+      <div class="row1">${{sym}}
         <span class="badge" style="background:${{r.color}}">${{r.bias}}</span></div>
       <div class="pat">${{r.name}}${{tag}} · <span class="dim">${{r.sector}}</span></div>
       <div class="stats">
@@ -408,6 +487,7 @@ function card(r){{
       </div>
       <div class="conf"><i style="width:${{Math.round(r.confidence*100)}}%"></i></div>
       <div class="note"><span class="verdict" style="background:${{r.vcolor}}">${{r.verdict}}</span><br>${{r.note}}</div>
+      ${{fund}}
     </div></div>`;
 }}
 function render(){{
@@ -415,7 +495,7 @@ function render(){{
   const p=fp.value, b=fb.value, s=document.getElementById('sort').value;
   const st=document.getElementById('fstate').value;
   const vd=document.getElementById('fverdict').value;
-  let rows=M.rows.filter(r=>(!p||r.name===p)&&(!b||r.bias===b)&&
+  let rows=CUR.filter(r=>(!p||r.name===p)&&(!b||r.bias===b)&&
     (!st||r.state===st)&&(!vd||r.verdict===vd)&&
     (!q||r.symbol.toLowerCase().includes(q)||(r.sector||'').toLowerCase().includes(q)));
   const key=r=> r[s]==null ? -Infinity : r[s];
@@ -432,7 +512,8 @@ function render(){{
 }}
 ['q','fstate','fverdict','fpat','fbias','sort'].forEach(id=>
   document.getElementById(id).addEventListener('input',render));
-render();
+fd.addEventListener('change',()=>loadDate(fd.value));
+loadDate(M.as_of);
 </script></body></html>"""
 
 
