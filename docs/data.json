@@ -1,6 +1,6 @@
 {
   "as_of": "2026-07-06",
-  "built": "06 Jul 2026, 23:33 IST",
+  "built": "07 Jul 2026, 00:00 IST",
   "total": 75,
   "breakouts": 8,
   "tradeable": 3,
@@ -1669,5 +1669,8 @@
       "note": "Price is pressing resistance \u2014 no trade yet. Set an alert and act only on a confirmed break backed by higher volume.",
       "vcolor": "#d97706"
     }
+  ],
+  "dates": [
+    "2026-07-06"
   ]
 }
