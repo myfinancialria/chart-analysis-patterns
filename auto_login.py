@@ -51,6 +51,19 @@ def post(label, url, payload, extra_headers=None):
         body = r.json()
     except Exception:
         body = r.text
+    # Fyers -1021 = account blocked. This is an account-state condition (usually
+    # from repeated failed OTP/PIN attempts), NOT a bad credential. Re-running only
+    # keeps the account blocked, so stop loudly and distinctly.
+    if isinstance(body, dict) and (
+        body.get("code") == -1021
+        or "account blocked" in str(body.get("message", "")).lower()
+    ):
+        print(f"  RESPONSE BODY: {body}")
+        sys.exit(
+            f"[{label}] FYERS ACCOUNT BLOCKED (code -1021). Do NOT re-run — that "
+            "keeps the account blocked. Log in manually at https://login.fyers.in "
+            "to clear it, then retry."
+        )
     if r.status_code >= 400:
         print(f"  RESPONSE BODY: {body}")
         sys.exit(f"[{label}] failed (HTTP {r.status_code}).")
