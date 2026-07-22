@@ -1,0 +1,7 @@
+entry_type,pattern,trades,stocks,win_rate_%,avg_R,avg_ret_%,avg_hold_days,total_pnl_rupees,avg_pnl_rupees,avg_capital,profit_factor,pct_hit_2R
+Breakout,Range breakout (up),239.0,180.0,31.4,0.58,6.05,38.0,1381602.0,5781.0,218277.0,1.83,35.6
+Breakout,Resistance breakout,675.0,336.0,29.8,0.43,3.15,32.0,2888895.0,4280.0,259480.0,1.57,36.1
+Breakout,Trendline breakout (down-line),331.0,211.0,33.5,0.54,4.65,50.0,1798686.0,5434.0,191904.0,1.85,36.0
+Retest,Range breakout (up),144.0,121.0,32.6,1.28,3.85,19.0,1847404.0,12829.0,332687.0,2.76,48.6
+Retest,Resistance breakout,414.0,265.0,29.7,1.21,3.63,19.0,5011682.0,12106.0,332450.0,2.65,44.0
+Retest,Trendline breakout (down-line),152.0,120.0,30.9,0.7,2.11,16.0,1068713.0,7031.0,332456.0,2.04,37.5

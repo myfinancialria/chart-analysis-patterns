@@ -1,0 +1,295 @@
+<style>
+:root{
+  --bg:#eef0f3; --paper:#ffffff; --ink:#0f172a; --mut:#5b6472; --faint:#8a94a3;
+  --line:#e3e7ec; --accent:#0e7490; --bull:#16a34a; --bear:#dc2626; --base:#64748b;
+  --bull-bg:#eaf7ef; --bear-bg:#fdeceb; --pos:#15803d; --neg:#b91c1c;
+  --shadow:0 1px 2px rgba(15,23,42,.05),0 8px 24px -16px rgba(15,23,42,.25);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#080d16; --paper:#111a29; --ink:#e6ebf2; --mut:#9aa6b6; --faint:#6b7889;
+  --line:#22314a; --accent:#22d3ee; --bull:#34d399; --bear:#f87171; --base:#8595a9;
+  --bull-bg:#0f2a20; --bear-bg:#2a1414; --pos:#4ade80; --neg:#f87171;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 30px -18px rgba(0,0,0,.7);
+}}
+:root[data-theme="light"]{ --bg:#eef0f3; --paper:#ffffff; --ink:#0f172a; --mut:#5b6472; --faint:#8a94a3; --line:#e3e7ec; --accent:#0e7490; --bull:#16a34a; --bear:#dc2626; --base:#64748b; --bull-bg:#eaf7ef; --bear-bg:#fdeceb; --pos:#15803d; --neg:#b91c1c; --shadow:0 1px 2px rgba(15,23,42,.05),0 8px 24px -16px rgba(15,23,42,.25);}
+:root[data-theme="dark"]{ --bg:#080d16; --paper:#111a29; --ink:#e6ebf2; --mut:#9aa6b6; --faint:#6b7889; --line:#22314a; --accent:#22d3ee; --bull:#34d399; --bear:#f87171; --base:#8595a9; --bull-bg:#0f2a20; --bear-bg:#2a1414; --pos:#4ade80; --neg:#f87171; --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 30px -18px rgba(0,0,0,.7);}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.55;
+  -webkit-font-smoothing:antialiased}
+.mono{font-family:ui-monospace,"SF Mono","Cascadia Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+.serif{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif}
+.wrap{max-width:900px;margin:0 auto;padding:40px 22px 64px}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+h1{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  font-size:clamp(30px,5vw,46px);line-height:1.08;margin:12px 0 10px;text-wrap:balance;font-weight:600;letter-spacing:-.01em}
+.lede{font-size:18px;color:var(--mut);max-width:66ch;margin:0}
+.rule{height:1px;background:var(--line);margin:30px 0}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:26px 0}
+.tile{background:var(--paper);border:1px solid var(--line);border-radius:13px;padding:15px 16px;box-shadow:var(--shadow)}
+.tile .k{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.tile .v{font-size:26px;font-weight:750;margin-top:5px;letter-spacing:-.01em}
+.tile .s{font-size:12px;color:var(--mut);margin-top:2px}
+.finding{background:var(--paper);border:1px solid var(--line);border-left:4px solid var(--accent);
+  border-radius:12px;padding:18px 20px;box-shadow:var(--shadow);margin:24px 0}
+.finding b{color:var(--ink)}
+h2{font-family:"Iowan Old Style",Palatino,Georgia,serif;font-size:23px;font-weight:600;margin:40px 0 4px;letter-spacing:-.01em}
+.sub{color:var(--mut);font-size:14px;margin:0 0 18px}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px 20px 12px}
+.chart-head{display:flex;justify-content:space-between;font-size:11px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--faint);padding:0 0 10px}
+.brow{display:grid;grid-template-columns:210px 1fr 46px;align-items:center;gap:12px;padding:7px 0;border-top:1px solid var(--line)}
+.brow:first-of-type{border-top:0}
+.blabel{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bdot{font-size:10px;width:16px;text-align:center;flex:0 0 auto}
+.bdot.bull{color:var(--bull)} .bdot.bear{color:var(--bear)}
+.btrack{position:relative;height:24px;background:linear-gradient(90deg,var(--bear-bg),transparent 48%,transparent 52%,var(--bull-bg));border-radius:5px}
+.bzero{position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:var(--faint);opacity:.6}
+.bbase{position:absolute;left:81.67%;top:-3px;bottom:-3px;width:0;border-left:1.5px dashed var(--base)}
+.bfill{position:absolute;top:4px;bottom:4px;border-radius:3px}
+.bfill.bull{background:var(--bull)} .bfill.bear{background:var(--bear)}
+.bval{position:absolute;top:2px;font-size:12px;font-weight:700;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+.bval.vr{left:calc(50% + 4px)} .bval.vl{right:calc(50% + 4px)}
+.bval.bull{color:var(--pos)} .bval.bear{color:var(--neg)}
+.bwin{font-size:12.5px;color:var(--mut);text-align:right}
+.baxis{display:flex;justify-content:space-between;font-size:11px;color:var(--faint);padding:8px 0 2px;margin-left:222px}
+.legend{font-size:12px;color:var(--mut);margin:12px 2px 0;display:flex;gap:16px;flex-wrap:wrap}
+.legend b{color:var(--base)}
+.tblwrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);background:var(--paper)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:640px}
+th,td{padding:11px 12px;text-align:left;border-top:1px solid var(--line)}
+thead th{border-top:0;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);font-weight:700;background:var(--bg)}
+td.r,th.r{text-align:right} .tname{font-weight:600}
+.pill{font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px}
+.pill.bull{background:var(--bull-bg);color:var(--pos)} .pill.bear{background:var(--bear-bg);color:var(--neg)}
+td.pos{color:var(--pos);font-weight:700} td.neg{color:var(--neg);font-weight:700}
+.prose{max-width:68ch} .prose p{margin:12px 0} .prose li{margin:6px 0}
+.note{font-size:13px;color:var(--mut);background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.foot{margin-top:40px;font-size:12.5px;color:var(--faint);border-top:1px solid var(--line);padding-top:18px}
+@media(max-width:680px){.tiles{grid-template-columns:repeat(2,1fr)}
+  .brow{grid-template-columns:130px 1fr 40px;gap:8px} .blabel{font-size:12px} .baxis{margin-left:138px}}
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">10-year backtest · NIFTY 500 · daily EOD</div>
+  <h1>Which chart patterns actually pay — and only two clearly beat the market</h1>
+  <p class="lede">Every volume-confirmed pattern the live scanner fires was replayed across ten years of history on all 500 stocks — 3,339 signals in all — then scored on the forward return you'd have earned trading it as intended. Volume-confirmed <b>breakouts</b> carry the edge; forming patterns and short setups do not.</p>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">Signals tested</div><div class="v mono">3,339</div><div class="s">10y · weekly walk-forward</div></div>
+    <div class="tile"><div class="k">Best pattern · 20d</div><div class="v" style="color:var(--pos)">+2.67%</div><div class="s">Resistance breakout</div></div>
+    <div class="tile"><div class="k">Its win rate</div><div class="v mono">59%</div><div class="s">vs 54% base rate</div></div>
+    <div class="tile"><div class="k">Market baseline</div><div class="v mono">+1.9%</div><div class="s">random long, 20 days</div></div>
+  </div>
+
+  <div class="finding"><b>Bottom line.</b> A <b>Resistance breakout</b> on a real volume surge returned <b>+2.67% over the next 20 trading days</b> (59% of the time positive) — about <b>+0.77%</b> ahead of simply buying a random stock (+1.9%), widening to <b>+7.5% at 60 days</b>. <b>Range breakouts</b> are the only other pattern that clearly beats the market. Everything else lands at or below the baseline, and shorting the bearish patterns <b>lost money</b> across a decade the market spent rising.</p></div>
+
+  <h2>Return by pattern, traded as intended</h2>
+  <p class="sub">Average forward return over 20 trading days · long on bullish signals (green), short on bearish (red) · dashed line = market baseline (+1.9%).</p>
+  <div class="card">
+    <div class="chart-head"><span>Pattern</span><span style="margin-right:56px">20-day return &amp; win-rate →</span></div>
+    <div class="brow">
+      <div class="blabel"><span class="bdot bull">▲</span>Resistance breakout</div>
+      <div class="btrack"><span class="bzero"></span><span class="bbase" title="market avg +1.9%"></span>
+        <span class="bfill bull" style="left:50%;width:44.50%"></span>
+        <span class="bval bull" style="left:calc(50% + 44.50% + 6px)">+2.67%</span></div>
+      <div class="bwin mono">59%</div>
+    </div>
+<div class="brow">
+      <div class="blabel"><span class="bdot bull">▲</span>Range breakout (up)</div>
+      <div class="btrack"><span class="bzero"></span><span class="bbase" title="market avg +1.9%"></span>
+        <span class="bfill bull" style="left:50%;width:41.83%"></span>
+        <span class="bval bull" style="left:calc(50% + 41.83% + 6px)">+2.51%</span></div>
+      <div class="bwin mono">54%</div>
+    </div>
+<div class="brow">
+      <div class="blabel"><span class="bdot bull">▲</span>Ascending triangle</div>
+      <div class="btrack"><span class="bzero"></span><span class="bbase" title="market avg +1.9%"></span>
+        <span class="bfill bull" style="left:50%;width:28.50%"></span>
+        <span class="bval bull" style="left:calc(50% + 28.50% + 6px)">+1.71%</span></div>
+      <div class="bwin mono">52%</div>
+    </div>
+<div class="brow">
+      <div class="blabel"><span class="bdot bull">▲</span>Trendline breakout (down-line)</div>
+      <div class="btrack"><span class="bzero"></span><span class="bbase" title="market avg +1.9%"></span>
+        <span class="bfill bull" style="left:50%;width:19.83%"></span>
+        <span class="bval bull" style="left:calc(50% + 19.83% + 6px)">+1.19%</span></div>
+      <div class="bwin mono">51%</div>
+    </div>
+<div class="brow">
+      <div class="blabel"><span class="bdot bull">▲</span>Falling wedge</div>
+      <div class="btrack"><span class="bzero"></span><span class="bbase" title="market avg +1.9%"></span>
+        <span class="bfill bull" style="left:50%;width:15.17%"></span>
+        <span class="bval bull" style="left:calc(50% + 15.17% + 6px)">+0.91%</span></div>
+      <div class="bwin mono">52%</div>
+    </div>
+<div class="brow">
+      <div class="blabel"><span class="bdot bear">▼</span>Trendline breakdown (up-line)</div>
+      <div class="btrack"><span class="bzero"></span><span class="bbase" title="market avg +1.9%"></span>
+        <span class="bfill bear" style="left:39.50%;width:10.50%"></span>
+        <span class="bval bear" style="right:calc(50% + 10.50% + 6px)">-0.63%</span></div>
+      <div class="bwin mono">48%</div>
+    </div>
+<div class="brow">
+      <div class="blabel"><span class="bdot bear">▼</span>Descending triangle</div>
+      <div class="btrack"><span class="bzero"></span><span class="bbase" title="market avg +1.9%"></span>
+        <span class="bfill bear" style="left:34.50%;width:15.50%"></span>
+        <span class="bval bear" style="right:calc(50% + 15.50% + 6px)">-0.93%</span></div>
+      <div class="bwin mono">50%</div>
+    </div>
+<div class="brow">
+      <div class="blabel"><span class="bdot bear">▼</span>Rising wedge</div>
+      <div class="btrack"><span class="bzero"></span><span class="bbase" title="market avg +1.9%"></span>
+        <span class="bfill bear" style="left:32.50%;width:17.50%"></span>
+        <span class="bval bear" style="right:calc(50% + 17.50% + 6px)">-1.05%</span></div>
+      <div class="bwin mono">47%</div>
+    </div>
+<div class="brow">
+      <div class="blabel"><span class="bdot bear">▼</span>Range breakdown (down)</div>
+      <div class="btrack"><span class="bzero"></span><span class="bbase" title="market avg +1.9%"></span>
+        <span class="bfill bear" style="left:15.83%;width:34.17%"></span>
+        <span class="bval bear" style="right:calc(50% + 34.17% + 6px)">-2.05%</span></div>
+      <div class="bwin mono">44%</div>
+    </div>
+<div class="brow">
+      <div class="blabel"><span class="bdot bear">▼</span>Support breakdown</div>
+      <div class="btrack"><span class="bzero"></span><span class="bbase" title="market avg +1.9%"></span>
+        <span class="bfill bear" style="left:12.67%;width:37.33%"></span>
+        <span class="bval bear" style="right:calc(50% + 37.33% + 6px)">-2.24%</span></div>
+      <div class="bwin mono">44%</div>
+    </div>
+    <div class="baxis"><span>−3%</span><span>0</span><span>+3%</span></div>
+  </div>
+  <div class="legend"><span><b>— — —</b> market baseline, a random 20-day long (+1.9%)</span><span>Right column = win rate</span></div>
+
+  <h2>Full results</h2>
+  <p class="sub">Direction-adjusted returns (%). Edge = return minus the same-direction market baseline; positive means the pattern added value beyond the market's drift.</p>
+  <div class="tblwrap"><table>
+    <thead><tr><th>Pattern</th><th>Bias</th><th class="r">Signals</th><th class="r">Mean 20d</th><th class="r">Median 20d</th><th class="r">Win 20d</th><th class="r">Mean 60d</th><th class="r">Win 60d</th><th class="r">Edge 20d</th></tr></thead>
+    <tbody><tr>
+      <td class="tname">Resistance breakout</td>
+      <td><span class="pill bull">Bullish</span></td>
+      <td class="mono r">779</td>
+      <td class="mono r">+2.67</td>
+      <td class="mono r">+1.54</td>
+      <td class="mono r">59%</td>
+      <td class="mono r">+7.55</td>
+      <td class="mono r">57%</td>
+      <td class="mono r pos">+0.77</td>
+    </tr>
+<tr>
+      <td class="tname">Range breakout (up)</td>
+      <td><span class="pill bull">Bullish</span></td>
+      <td class="mono r">298</td>
+      <td class="mono r">+2.51</td>
+      <td class="mono r">+1.08</td>
+      <td class="mono r">54%</td>
+      <td class="mono r">+7.45</td>
+      <td class="mono r">60%</td>
+      <td class="mono r pos">+0.61</td>
+    </tr>
+<tr>
+      <td class="tname">Ascending triangle</td>
+      <td><span class="pill bull">Bullish</span></td>
+      <td class="mono r">195</td>
+      <td class="mono r">+1.71</td>
+      <td class="mono r">+0.77</td>
+      <td class="mono r">52%</td>
+      <td class="mono r">+3.41</td>
+      <td class="mono r">53%</td>
+      <td class="mono r neg">-0.19</td>
+    </tr>
+<tr>
+      <td class="tname">Trendline breakout (down-line)</td>
+      <td><span class="pill bull">Bullish</span></td>
+      <td class="mono r">391</td>
+      <td class="mono r">+1.19</td>
+      <td class="mono r">+0.20</td>
+      <td class="mono r">51%</td>
+      <td class="mono r">+3.80</td>
+      <td class="mono r">54%</td>
+      <td class="mono r neg">-0.71</td>
+    </tr>
+<tr>
+      <td class="tname">Falling wedge</td>
+      <td><span class="pill bull">Bullish</span></td>
+      <td class="mono r">471</td>
+      <td class="mono r">+0.91</td>
+      <td class="mono r">+0.41</td>
+      <td class="mono r">52%</td>
+      <td class="mono r">+1.48</td>
+      <td class="mono r">48%</td>
+      <td class="mono r neg">-0.99</td>
+    </tr>
+<tr>
+      <td class="tname">Trendline breakdown (up-line)</td>
+      <td><span class="pill bear">Bearish</span></td>
+      <td class="mono r">219</td>
+      <td class="mono r">-0.63</td>
+      <td class="mono r">-0.33</td>
+      <td class="mono r">48%</td>
+      <td class="mono r">-4.37</td>
+      <td class="mono r">42%</td>
+      <td class="mono r pos">+1.27</td>
+    </tr>
+<tr>
+      <td class="tname">Descending triangle</td>
+      <td><span class="pill bear">Bearish</span></td>
+      <td class="mono r">318</td>
+      <td class="mono r">-0.93</td>
+      <td class="mono r">+0.00</td>
+      <td class="mono r">50%</td>
+      <td class="mono r">-2.39</td>
+      <td class="mono r">53%</td>
+      <td class="mono r pos">+0.97</td>
+    </tr>
+<tr>
+      <td class="tname">Rising wedge</td>
+      <td><span class="pill bear">Bearish</span></td>
+      <td class="mono r">360</td>
+      <td class="mono r">-1.05</td>
+      <td class="mono r">-0.58</td>
+      <td class="mono r">47%</td>
+      <td class="mono r">-3.63</td>
+      <td class="mono r">45%</td>
+      <td class="mono r pos">+0.85</td>
+    </tr>
+<tr>
+      <td class="tname">Range breakdown (down)</td>
+      <td><span class="pill bear">Bearish</span></td>
+      <td class="mono r">59</td>
+      <td class="mono r">-2.05</td>
+      <td class="mono r">-0.90</td>
+      <td class="mono r">44%</td>
+      <td class="mono r">-6.36</td>
+      <td class="mono r">33%</td>
+      <td class="mono r neg">-0.15</td>
+    </tr>
+<tr>
+      <td class="tname">Support breakdown</td>
+      <td><span class="pill bear">Bearish</span></td>
+      <td class="mono r">249</td>
+      <td class="mono r">-2.24</td>
+      <td class="mono r">-1.05</td>
+      <td class="mono r">44%</td>
+      <td class="mono r">-7.15</td>
+      <td class="mono r">44%</td>
+      <td class="mono r neg">-0.34</td>
+    </tr></tbody>
+  </table></div>
+
+  <h2>What it means</h2>
+  <div class="prose">
+    <p><b>The edge lives in completed breakouts, not forming patterns.</b> Grouped by what the signal <em>is</em>: fresh <b>breakouts</b> (n=1468) returned <b>+2.24%/20d</b> (56% win, +6.5%/60d); still-<b>forming</b> triangles &amp; wedges (n=1344) were essentially flat at <b>+0.07%</b> — they haven't resolved yet, so there's no edge until price actually breaks. The takeaway: a volume-backed break is the tradeable moment; the tidy geometry beforehand is a watch-list, not a trigger.</p>
+    <p><b>Volume is the filter that matters.</b> Every signal here already cleared the volume test — breakouts on ≥1.3× average volume, squeezes on drying-up volume. Resistance and Range breakouts, which pair a clean level with a genuine volume surge, are exactly the setups that beat the market.</p>
+    <p><b>Shorting didn't work — but the bearish read wasn't useless.</b> Traded as shorts, all five bearish patterns lost money, because 2016–2026 was a broad up-market and shorts fought the tide. Yet several still flagged <em>relative weakness</em>: a stock breaking down or forming a rising wedge tended to underperform a random stock over the next 20 days. Useful as an "avoid / reduce" signal, not as a naked short.</p>
+  </div>
+
+  <h2>How this was tested</h2>
+  <div class="note">
+    <b>Method.</b> All 500 current NIFTY 500 names, ~10 years of daily candles (Yahoo Finance). For each stock the clock is stepped forward one week at a time; at each step the <em>same</em> detectors and the <em>same</em> high-conviction volume filter used on the live dashboard run on trailing data only — no look-ahead. Each qualifying signal (deduplicated to one per pattern per stock per ~month) is entered at that day's close and scored on its forward return, long for bullish and short for bearish, at 10 / 20 / 60 trading days. The baseline is the average forward return of a random long entry over the same windows and dates.<br><br>
+    <b>Caveats — read these.</b> The universe is <em>today's</em> NIFTV 500, so it carries survivorship bias (past winners are over-represented, which flatters bullish results). Entries are end-of-day at the close with <em>no</em> brokerage, slippage or impact costs. Signals overlap and market regimes shift, so a single decade is one sample, not a law. This is a descriptive study of historical price behaviour — <b>not</b> investment advice, and not a promise about the future.
+  </div>
+
+  <div class="foot mono">NIFTY 500 pattern backtest · 3,339 signals · 10-year walk-forward · generated 22 Jul 2026. Educational / informational only; prepared by a person who is not a SEBI-registered adviser.</div>
+</div>
