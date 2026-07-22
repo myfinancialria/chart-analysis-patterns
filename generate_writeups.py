@@ -52,7 +52,9 @@ _PROVIDER_DEFS = {
     "gemini": {
         "base_url": _env("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
         "key": os.getenv("GEMINI_API_KEY", ""),
-        "model": _env("GEMINI_MODEL", "gemini-2.5-flash"),
+        # 2.0-flash (not 2.5): no "thinking" tokens that would eat the response
+        # budget and truncate the write-up, plus its own fresh daily quota.
+        "model": _env("GEMINI_MODEL", "gemini-2.0-flash"),
         "daily_cap": int(_env("GEMINI_DAILY_CAP", "1400")),
         "interval": float(_env("GEMINI_INTERVAL", "4.5")),
     },
@@ -121,7 +123,7 @@ def _post(provider: dict, system: str, user: str, timeout: int = 90):
         json={
             "model": provider["model"],
             "temperature": 0.4,
-            "max_tokens": 400,
+            "max_tokens": 700,  # headroom so any provider's reply isn't truncated
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
