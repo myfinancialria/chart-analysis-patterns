@@ -41,7 +41,15 @@ jobs:
       - name: Run scan + build dashboard
         env:
           FYERS_CLIENT_ID: ${{ secrets.FYERS_CLIENT_ID }}
-        run: python scan.py --site --min-conf 0.55
+          # Free LLM providers for the per-setup write-ups (Gemini -> Groq ->
+          # OpenRouter), per-day capped with failover. No-op if none are set.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          AI_PROVIDER_ORDER: ${{ vars.AI_PROVIDER_ORDER }}
+        # Detect broadly (0.50), then surface only strong, volume-confirmed
+        # bullish/bearish setups (--high-conf 0.60) and write them up with an LLM.
+        run: python scan.py --site --writeups --min-conf 0.50 --high-conf 0.60
 
       - name: Commit updated dashboard
         run: |

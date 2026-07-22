@@ -214,11 +214,13 @@ def _latest_cache() -> pd.DataFrame:
     return pd.read_csv(files[-1])
 
 
-def build(df: pd.DataFrame | None = None, candles: pd.DataFrame | None = None) -> Path:
+def build(df: pd.DataFrame | None = None, candles: pd.DataFrame | None = None,
+          writeups: dict | None = None) -> Path:
     if df is None:
         df = pd.read_csv(OUT_DIR / "patterns_latest.csv")
     if candles is None:
         candles = _latest_cache()
+    writeups = writeups or {}
 
     DOCS.mkdir(exist_ok=True)
     CHARTS.mkdir(exist_ok=True)
@@ -258,6 +260,7 @@ def build(df: pd.DataFrame | None = None, candles: pd.DataFrame | None = None) -
             "color": BIAS_COLOR.get(r["bias"], "#64748b"),
             "verdict": verdict, "note": note,
             "vcolor": VERDICT_COLOR.get(verdict, "#64748b"),
+            "ai_note": writeups.get(f"{r['symbol']}|{r['name']}"),
         })
 
     ist = timezone(timedelta(hours=5, minutes=30))
@@ -364,6 +367,12 @@ h2.cat span{{font-size:12px;color:var(--mut);font-weight:500}}
 .conf>i{{display:block;height:100%;background:#3b82f6}}
 .note{{margin:10px 0 0;padding:9px 11px;background:var(--soft);border:1px solid var(--line);
   border-radius:9px;font-size:12.5px;line-height:1.45;color:#374151}}
+.ainote{{margin:8px 0 0;padding:9px 11px;background:#f5f8ff;border:1px solid #dbe6ff;
+  border-radius:9px;font-size:12.5px;line-height:1.5;color:#1f2937}}
+.ainote .ailbl{{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.03em;
+  text-transform:uppercase;color:#3b5bdb;margin-bottom:4px}}
+.ainote ul{{margin:4px 0 0;padding-left:18px}} .ainote li{{margin:2px 0}}
+.ainote b{{color:#111827}}
 .verdict{{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.02em;
   text-transform:uppercase;padding:2px 8px;border-radius:999px;color:#fff;margin-bottom:5px}}
 a.symlink{{color:#15803d;text-decoration:none;font-weight:700;font-size:16px}}
@@ -378,8 +387,8 @@ footer{{max-width:1320px;margin:0 auto;padding:22px 20px 60px;color:var(--mut);
 </style></head><body>
 <header>
   <h1>NIFTY 500 — Daily Chart Patterns</h1>
-  <div class="sub">Daily EOD scan · patterns, S/R boxes &amp; breakouts, with daily
-    volume and a trade read on each · as of <b id="asof"></b>
+  <div class="sub">Daily EOD scan · only <b>strong, volume-confirmed</b> bullish &amp;
+    bearish setups · with a plain-English AI read on each · as of <b id="asof"></b>
     <span class="dim">· built <span id="built"></span></span></div>
   <div class="chips">
     <span class="chip go">✅ Tradeable now<b id="tcount"></b></span>
@@ -408,8 +417,9 @@ footer{{max-width:1320px;margin:0 auto;padding:22px 20px 60px;color:var(--mut);
 <footer>
   <b>Educational / informational only.</b> This is a descriptive geometric scan of
   historical price action — not investment advice, not a buy/sell recommendation,
-  and not a price forecast. The trade notes are automated, rule-based observations
-  about setup readiness, not personalised advice. Prepared by a person who is
+  and not a price forecast. The trade notes (rule-based) and the "AI read" (generated
+  by a language model from the scan's own numbers) are automated, descriptive
+  observations about setup readiness, not personalised advice. Prepared by a person who is
   <b>not</b> a SEBI-registered Research Analyst or Investment Adviser. Chart patterns
   fail often; always do your own research and manage risk. Source: Fyers daily candles.
 </footer>
@@ -473,6 +483,8 @@ function card(r){{
   const fund = tradeable
     ? `<div class="fund"><a href="${{url}}" target="_blank" rel="noopener">📊 Company, fundamentals &amp; financials · industry overview ↗</a></div>`
     : '';
+  const ai = r.ai_note
+    ? `<div class="ainote"><span class="ailbl">🤖 AI read</span>${{mdLite(r.ai_note)}}</div>` : '';
   return `<div class="card ${{isBrk(r)?'brk':''}}">
     <img loading="lazy" src="${{BASE}}${{r.chart}}" alt="${{r.symbol}} ${{r.name}}">
     <div class="meta">
@@ -487,8 +499,22 @@ function card(r){{
       </div>
       <div class="conf"><i style="width:${{Math.round(r.confidence*100)}}%"></i></div>
       <div class="note"><span class="verdict" style="background:${{r.vcolor}}">${{r.verdict}}</span><br>${{r.note}}</div>
+      ${{ai}}
       ${{fund}}
     </div></div>`;
+}}
+function mdLite(s){{
+  let t=(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const parts=t.split('**'); t=parts.map((x,i)=>i%2?('<b>'+x+'</b>'):x).join('');
+  const lines=t.split('\\n').map(x=>x.trim()).filter(Boolean);
+  const isB=x=>x.startsWith('* ')||x.startsWith('- ')||x.startsWith('• ');
+  let html='',inul=false;
+  for(const ln of lines){{
+    if(isB(ln)){{ if(!inul){{html+='<ul>';inul=true;}} html+='<li>'+ln.slice(2)+'</li>'; }}
+    else {{ if(inul){{html+='</ul>';inul=false;}} html+='<p style="margin:4px 0 0">'+ln+'</p>'; }}
+  }}
+  if(inul) html+='</ul>';
+  return html;
 }}
 function render(){{
   const q=document.getElementById('q').value.toLowerCase();

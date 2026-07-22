@@ -191,6 +191,36 @@ def run_scan(df: pd.DataFrame, sectors: dict, args) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
+# ---------------- high-conviction filter ----------------
+def filter_high_conviction(out: pd.DataFrame, min_conf: float = 0.60,
+                           vol_surge_min: float = 1.3,
+                           vol_contract_max: float = 0.85) -> pd.DataFrame:
+    """Keep only strong, directional, volume-confirmed setups:
+      * bias is clearly Bullish or Bearish (drop Neutral / channel trends),
+      * confidence >= min_conf,
+      * VOLUME confirms the signal —
+          breakouts/breakdowns need a volume surge (vol_surge >= vol_surge_min),
+          forming triangles/wedges need volume drying up (vol_contraction <= vol_contract_max).
+    Testing/"pressing a level" rows are dropped (no confirmation yet)."""
+    if out.empty:
+        return out
+    d = out[out["bias"].isin(["Bullish", "Bearish"])].copy()
+    d = d[pd.to_numeric(d["confidence"], errors="coerce") >= min_conf]
+
+    def _vol_ok(r) -> bool:
+        state = r.get("state")
+        if state in ("Breakout", "Breakdown"):
+            vs = r.get("vol_surge")
+            return pd.notna(vs) and float(vs) >= vol_surge_min
+        if state == "Forming":
+            vc = r.get("vol_contraction")
+            return pd.notna(vc) and float(vc) <= vol_contract_max
+        return False  # Testing / anything unconfirmed
+
+    d = d[d.apply(_vol_ok, axis=1)]
+    return d.reset_index(drop=True)
+
+
 # ---------------- charts ----------------
 def draw_montage(df: pd.DataFrame, candles: pd.DataFrame, top_n: int) -> Path | None:
     # the montage draws two-rail patterns; breakouts/levels live on the dashboard
@@ -258,12 +288,19 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=365, help="calendar days of history (Fyers max ~365)")
     ap.add_argument("--limit", type=int, default=0, help="cap symbols (smoke test)")
-    ap.add_argument("--min-conf", type=float, default=0.50)
+    ap.add_argument("--min-conf", type=float, default=0.50, help="detection confidence floor")
     ap.add_argument("--cache", action="store_true", help="reuse today's cached candles")
     ap.add_argument("--no-charts", action="store_true")
     ap.add_argument("--charts", type=int, default=12, help="how many setups to chart")
     ap.add_argument("--slack", action="store_true", help="post digest to Slack")
     ap.add_argument("--site", action="store_true", help="build the docs/ dashboard")
+    # high-conviction filter: surface only strong, volume-confirmed bull/bear setups
+    ap.add_argument("--all-signals", action="store_true",
+                    help="keep every detected signal (skip the high-conviction/volume filter)")
+    ap.add_argument("--high-conf", type=float, default=0.60, help="confidence floor for surfaced setups")
+    ap.add_argument("--vol-surge", type=float, default=1.3, help="min breakout volume vs base")
+    ap.add_argument("--vol-contract", type=float, default=0.85, help="max forming-pattern volume ratio")
+    ap.add_argument("--writeups", action="store_true", help="generate LLM write-ups for surfaced setups")
     args = ap.parse_args()
 
     uni = load_universe()
@@ -279,6 +316,15 @@ def main() -> int:
     if out.empty:
         print("No patterns found at this confidence floor.")
         return 0
+
+    if not args.all_signals:
+        n_all = len(out)
+        out = filter_high_conviction(out, args.high_conf, args.vol_surge, args.vol_contract)
+        print(f"High-conviction filter: kept {len(out)}/{n_all} strong, volume-confirmed "
+              f"bull/bear setups (conf>={args.high_conf}, breakout vol>={args.vol_surge}x, "
+              f"forming vol<={args.vol_contract}).")
+        if out.empty:
+            print("No high-conviction setups today — building an empty dashboard.")
 
     csv_path = OUT_DIR / f"patterns_{date.today():%Y%m%d}.csv"
     out.to_csv(csv_path, index=False)
@@ -301,9 +347,17 @@ def main() -> int:
         if montage:
             print(f"Charts -> {montage}")
 
+    writeups = {}
+    if args.writeups and not out.empty:
+        try:
+            import generate_writeups
+            writeups = generate_writeups.generate(out)
+        except Exception as exc:  # never let write-up trouble break the scan
+            print(f"write-up generation skipped: {exc}")
+
     if args.site:
         import build_site
-        idx = build_site.build(out, candles)
+        idx = build_site.build(out, candles, writeups)
         print(f"Site -> {idx}")
 
     if args.slack:
