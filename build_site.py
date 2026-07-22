@@ -268,6 +268,9 @@ def build(df: pd.DataFrame | None = None, candles: pd.DataFrame | None = None,
     last_date = df["last_date"].iloc[0] if "last_date" in df and len(df) else str(date.today())
     counts = df["name"].value_counts().to_dict()
 
+    # tag each signal as new-today / new-this-week vs the prior daily snapshots
+    _tag_new(records, str(last_date))
+
     breakouts = sum(1 for r in records if r["state"] in ("Breakout", "Breakdown"))
     tradeable = sum(1 for r in records if r["verdict"] == "Tradeable")
     meta = {
@@ -276,6 +279,8 @@ def build(df: pd.DataFrame | None = None, candles: pd.DataFrame | None = None,
         "total": len(records),
         "breakouts": breakouts,
         "tradeable": tradeable,
+        "new_today": sum(1 for r in records if r.get("new_today")),
+        "new_week": sum(1 for r in records if r.get("new_week")),
         "counts": counts,
         "rows": records,
     }
@@ -288,6 +293,39 @@ def build(df: pd.DataFrame | None = None, candles: pd.DataFrame | None = None,
     (DOCS / "index.html").write_text(_html(meta))
     (DOCS / ".nojekyll").write_text("")
     return DOCS / "index.html"
+
+
+def _tag_new(records: list[dict], today: str) -> None:
+    """Flag each signal new_today / new_week / first_seen by comparing (symbol,
+    pattern) against the prior daily snapshots in history/. A signal is
+    new_today if it wasn't in the most recent earlier scan; new_week if it hadn't
+    appeared in any scan more than 7 days ago (i.e. first surfaced this week)."""
+    prior: dict[str, set] = {}
+    if HISTORY.exists():
+        for d in HISTORY.iterdir():
+            j = d / "data.json"
+            if d.is_dir() and d.name < today and j.exists():
+                try:
+                    rows = json.loads(j.read_text()).get("rows", [])
+                    prior[d.name] = {f"{r.get('symbol')}|{r.get('name')}" for r in rows}
+                except Exception:
+                    pass
+    dates = sorted(prior)
+    yset = prior[dates[-1]] if dates else set()
+    try:
+        cutoff = (date.fromisoformat(today) - timedelta(days=7)).isoformat()
+    except ValueError:
+        cutoff = today
+    older = set().union(*[prior[d] for d in dates if d <= cutoff]) if dates else set()
+    first_seen: dict[str, str] = {}
+    for d in dates:                       # ascending → earliest wins
+        for k in prior[d]:
+            first_seen.setdefault(k, d)
+    for r in records:
+        k = f"{r['symbol']}|{r['name']}"
+        r["new_today"] = k not in yset
+        r["new_week"] = k not in older
+        r["first_seen"] = first_seen.get(k, today)
 
 
 def _archive(meta: dict, day: str) -> list[str]:
@@ -334,6 +372,18 @@ header{{padding:24px 20px 8px;max-width:1320px;margin:0 auto}}
 h1{{margin:0 0 4px;font-size:23px}}
 .sub{{color:var(--mut);font-size:13px}}
 .chips{{margin:12px 0;display:flex;flex-wrap:wrap;gap:8px}}
+.rlinks{{margin:10px 0 0;display:flex;flex-wrap:wrap;gap:16px;font-size:13px}}
+.rlinks a{{color:#2563eb;text-decoration:none;font-weight:600}}
+.rlinks a:hover{{text-decoration:underline}}
+.ftabs{{margin:14px 0 2px;display:flex;flex-wrap:wrap;gap:8px}}
+.ftab{{font:600 13px inherit;color:var(--mut);background:var(--card);border:1px solid var(--line);
+  border-radius:999px;padding:7px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:2px}}
+.ftab:hover{{border-color:#94a3b8}}
+.ftab.active{{background:#111827;color:#fff;border-color:#111827}}
+.ftab b{{margin-left:5px;font-weight:800;opacity:.85}}
+.badge-new{{font-size:9.5px;font-weight:800;letter-spacing:.03em;color:#fff;background:#e11d48;
+  padding:1px 6px;border-radius:999px;margin-left:6px;vertical-align:middle}}
+.badge-new.wk{{background:#0e7490}}
 .chip{{background:var(--soft);border:1px solid var(--line);border-radius:999px;
   padding:4px 11px;font-size:12px;color:var(--mut)}}
 .chip b{{color:var(--fg);margin-left:6px}}
@@ -393,6 +443,16 @@ footer{{max-width:1320px;margin:0 auto;padding:22px 20px 60px;color:var(--mut);
   <div class="chips">
     <span class="chip go">✅ Tradeable now<b id="tcount"></b></span>
     <span class="chip hot">⚡ Fresh breakouts<b id="bocount"></b></span>{chips}</div>
+  <div class="rlinks">
+    <a href="backtest/" target="_blank" rel="noopener">🎯 10-year backtest &amp; results ↗</a>
+    <a href="backtest/report_trade_backtest.html" target="_blank" rel="noopener">📈 Trade-system report ↗</a>
+    <a href="backtest/nifty500_breakout_trades.csv">⬇ Trade log (CSV)</a>
+  </div>
+  <div class="ftabs" id="ftabs">
+    <button class="ftab active" data-nf="">All signals</button>
+    <button class="ftab" data-nf="today">⭐ New today<b id="ntcount"></b></button>
+    <button class="ftab" data-nf="week">🆕 New this week<b id="nwcount"></b></button>
+  </div>
 </header>
 <div class="bar">
   <input id="q" placeholder="Search symbol / sector…" style="flex:1;min-width:180px">
@@ -458,6 +518,9 @@ async function loadDate(d){{
     CUR.filter(r=>r.state==='Breakout'||r.state==='Breakdown').length;
   document.getElementById('tcount').textContent =
     CUR.filter(r=>r.verdict==='Tradeable').length;
+  const nt=CUR.filter(r=>r.new_today).length, nw=CUR.filter(r=>r.new_week).length;
+  document.getElementById('ntcount').textContent = nt;
+  document.getElementById('nwcount').textContent = nw;
   render();
 }}
 function refreshFilters(){{
@@ -485,11 +548,13 @@ function card(r){{
     : '';
   const ai = r.ai_note
     ? `<div class="ainote"><span class="ailbl">🤖 AI read</span>${{mdLite(r.ai_note)}}</div>` : '';
+  const nb = r.new_today ? '<span class="badge-new" title="first appeared today">⭐ NEW</span>'
+    : (r.new_week ? '<span class="badge-new wk" title="first appeared this week">🆕 wk</span>' : '');
   return `<div class="card ${{isBrk(r)?'brk':''}}">
     <img loading="lazy" src="${{BASE}}${{r.chart}}" alt="${{r.symbol}} ${{r.name}}">
     <div class="meta">
       <div class="row1">${{sym}}
-        <span class="badge" style="background:${{r.color}}">${{r.bias}}</span></div>
+        <span class="badge" style="background:${{r.color}}">${{r.bias}}</span>${{nb}}</div>
       <div class="pat">${{r.name}}${{tag}} · <span class="dim">${{r.sector}}</span></div>
       <div class="stats">
         <span>₹<b>${{r.close.toLocaleString('en-IN')}}</b></span>
@@ -516,6 +581,7 @@ function mdLite(s){{
   if(inul) html+='</ul>';
   return html;
 }}
+let NF='';  // '' | 'today' | 'week' — the New-signal filter tab
 function render(){{
   const q=document.getElementById('q').value.toLowerCase();
   const p=fp.value, b=fb.value, s=document.getElementById('sort').value;
@@ -523,6 +589,7 @@ function render(){{
   const vd=document.getElementById('fverdict').value;
   let rows=CUR.filter(r=>(!p||r.name===p)&&(!b||r.bias===b)&&
     (!st||r.state===st)&&(!vd||r.verdict===vd)&&
+    (NF===''||(NF==='today'&&r.new_today)||(NF==='week'&&r.new_week))&&
     (!q||r.symbol.toLowerCase().includes(q)||(r.sector||'').toLowerCase().includes(q)));
   const key=r=> r[s]==null ? -Infinity : r[s];
   rows.sort((a,z)=> s==='symbol' ? a.symbol.localeCompare(z.symbol)
@@ -538,6 +605,11 @@ function render(){{
 }}
 ['q','fstate','fverdict','fpat','fbias','sort'].forEach(id=>
   document.getElementById(id).addEventListener('input',render));
+document.querySelectorAll('.ftab').forEach(btn=>btn.addEventListener('click',()=>{{
+  NF=btn.dataset.nf;
+  document.querySelectorAll('.ftab').forEach(b=>b.classList.toggle('active',b===btn));
+  render();
+}}));
 fd.addEventListener('change',()=>loadDate(fd.value));
 loadDate(M.as_of);
 </script></body></html>"""
