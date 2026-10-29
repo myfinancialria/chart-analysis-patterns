@@ -98,7 +98,7 @@ def fetch_history(symbols: list[str], days: int) -> pd.DataFrame:
     end_dt = date.today()
     start_dt = end_dt - timedelta(days=days)
     # Fyers data API limit is ~200 req/min — throttle to ~170/min with margin.
-    THROTTLE = 0.36
+    THROTTLE = 0.36  # stay below Fyers history API rate limits
 
     def fetch_one(sym: str):
         payload = {
