@@ -101,31 +101,47 @@ def fetch_history(symbols: list[str], days: int) -> pd.DataFrame:
     THROTTLE = 0.36
 
     def fetch_one(sym: str):
-        resp = fyers.history(data={
+        payload = {
             "symbol": f"NSE:{sym}-EQ", "resolution": "D", "date_format": "1",
             "range_from": start_dt.strftime("%Y-%m-%d"),
             "range_to": end_dt.strftime("%Y-%m-%d"), "cont_flag": "1",
-        })
+        }
+        try:
+            resp = fyers.history(data=payload)
+        except Exception as exc:
+            return None, f"exception {type(exc).__name__}: {exc}"
         if resp.get("s") != "ok" or not resp.get("candles"):
-            return None
+            return None, (
+                f"status={resp.get('s')!r} code={resp.get('code')!r} "
+                f"message={resp.get('message')!r}"
+            )
         df = pd.DataFrame(resp["candles"],
                           columns=["ts", "open", "high", "low", "close", "volume"])
         df["symbol"] = sym
         df["date"] = (pd.to_datetime(df["ts"], unit="s", utc=True)
                       .dt.tz_convert("Asia/Kolkata").dt.strftime("%Y-%m-%d"))
-        return df[["date", "symbol", "open", "high", "low", "close", "volume"]]
+        return df[["date", "symbol", "open", "high", "low", "close", "volume"]], None
 
     def fetch_pass(syms: list[str], label: str):
-        rows, failed = [], []
+        rows, failed, reasons = [], [], []
         for i, sym in enumerate(syms, 1):
             try:
-                df = fetch_one(sym)
-                (rows.append(df) if df is not None else failed.append(sym))
-            except Exception:
+                df, reason = fetch_one(sym)
+                if df is not None:
+                    rows.append(df)
+                else:
+                    failed.append(sym)
+                    if len(reasons) < 5:
+                        reasons.append(f"{sym}: {reason}")
+            except Exception as exc:
                 failed.append(sym)
+                if len(reasons) < 5:
+                    reasons.append(f"{sym}: exception {type(exc).__name__}: {exc}")
             if i % 50 == 0:
                 print(f"  {label}: {i}/{len(syms)}")
             time.sleep(THROTTLE)
+        if reasons:
+            print(f"  {label} sample failures: {' | '.join(reasons)}")
         return rows, failed
 
     # skip placeholder/non-tradable tickers
