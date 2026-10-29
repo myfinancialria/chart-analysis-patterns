@@ -109,7 +109,7 @@ def fetch_history(symbols: list[str], days: int) -> pd.DataFrame:
         try:
             resp = fyers.history(data=payload)
         except Exception as exc:
-            return None, f"exception {type(exc).__name__}: {exc}"
+            return None, f"exception {type(exc).__name__}: {exc}", None
         if resp.get("s") != "ok" or not resp.get("candles"):
             return None, (
                 f"status={resp.get('s')!r} code={resp.get('code')!r} "
