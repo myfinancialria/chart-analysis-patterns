@@ -2,21 +2,24 @@ name: Daily chart-pattern scan
 
 on:
   schedule:
-    # 11:00 UTC = 16:30 IST, after NSE close (Mon–Fri). NSE holidays just re-run harmlessly.
+    # 11:00 UTC = 16:30 IST, after NSE close (Mon-Fri).
     - cron: "0 11 * * 1-5"
-  workflow_dispatch: {}   # allow manual runs from the Actions tab
+  workflow_dispatch: {}
 
 permissions:
-  contents: write          # needed to commit the rebuilt docs/ back to the repo
+  contents: write
 
 concurrency:
   group: daily-scan
   cancel-in-progress: false
 
+env:
+  PYTHONUNBUFFERED: "1"
+
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -26,44 +29,101 @@ jobs:
           cache: pip
 
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate required Fyers secrets
+        env:
+          FYERS_CLIENT_ID: ${{ secrets.FYERS_CLIENT_ID }}
+          FYERS_SECRET: ${{ secrets.FYERS_SECRET }}
+          FYERS_REDIRECT: ${{ secrets.FYERS_REDIRECT }}
+          FYERS_FY_ID: ${{ secrets.FYERS_FY_ID }}
+          FYERS_PIN: ${{ secrets.FYERS_PIN }}
+          FYERS_TOTP_KEY: ${{ secrets.FYERS_TOTP_KEY }}
+        shell: bash
+        run: |
+          set -u
+          missing=0
+          for name in FYERS_CLIENT_ID FYERS_SECRET FYERS_REDIRECT FYERS_FY_ID FYERS_PIN FYERS_TOTP_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing GitHub secret::$name is not configured"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Mint Fyers access token
         env:
           FYERS_CLIENT_ID: ${{ secrets.FYERS_CLIENT_ID }}
-          FYERS_SECRET:    ${{ secrets.FYERS_SECRET }}
-          FYERS_REDIRECT:  ${{ secrets.FYERS_REDIRECT }}
-          FYERS_FY_ID:     ${{ secrets.FYERS_FY_ID }}
-          FYERS_PIN:       ${{ secrets.FYERS_PIN }}
-          FYERS_TOTP_KEY:  ${{ secrets.FYERS_TOTP_KEY }}
+          FYERS_SECRET: ${{ secrets.FYERS_SECRET }}
+          FYERS_REDIRECT: ${{ secrets.FYERS_REDIRECT }}
+          FYERS_FY_ID: ${{ secrets.FYERS_FY_ID }}
+          FYERS_PIN: ${{ secrets.FYERS_PIN }}
+          FYERS_TOTP_KEY: ${{ secrets.FYERS_TOTP_KEY }}
         run: python auto_login.py
 
-      - name: Run scan + build dashboard
+      - name: Run scan and build dashboard
         env:
           FYERS_CLIENT_ID: ${{ secrets.FYERS_CLIENT_ID }}
-          # Free LLM providers for the per-setup write-ups (Gemini -> Groq ->
-          # OpenRouter), per-day capped with failover. No-op if none are set.
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           AI_PROVIDER_ORDER: ${{ vars.AI_PROVIDER_ORDER }}
-        # Detect broadly (0.50), then surface only strong, volume-confirmed
-        # bullish/bearish setups (--high-conf 0.60) and write them up with an LLM.
         run: python scan.py --site --writeups --min-conf 0.50 --high-conf 0.60
+
+      - name: Validate dashboard output
+        run: |
+          test -s docs/index.html
+          test -s docs/data.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("docs/data.json").read_text())
+          required = {"as_of", "built", "rows", "dates"}
+          missing = required.difference(data)
+          if missing:
+              raise SystemExit(f"docs/data.json is missing keys: {sorted(missing)}")
+          if not isinstance(data["rows"], list):
+              raise SystemExit("docs/data.json rows is not a list")
+          print(f"Dashboard validated: as_of={data['as_of']}, rows={len(data['rows'])}")
+          PY
+
+      - name: Record successful run
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+
+          now = datetime.now(timezone.utc)
+          payload = {
+              "status": "success",
+              "workflow": "daily-scan",
+              "completed_at_utc": now.isoformat().replace("+00:00", "Z"),
+              "completed_at_ist": now.astimezone(ZoneInfo("Asia/Kolkata")).isoformat(),
+              "dashboard_as_of": json.loads(Path("docs/data.json").read_text())["as_of"],
+          }
+          Path("docs/last-run.json").write_text(
+              json.dumps(payload, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(payload))
+          PY
 
       - name: Commit updated dashboard
         run: |
-          git config user.name  "github-actions[bot]"
+          git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A docs   # -A so pruned history/ snapshots (deletions) are staged too
-          if git diff --cached --quiet; then
-            echo "No dashboard changes."
-          else
-            git commit -m "Daily pattern scan — $(date -u +%Y-%m-%d)"
-            git push
-          fi
+          git add -A docs
+          git commit -m "Daily pattern scan — $(date -u +%Y-%m-%d)"
+          git push
 
-      - name: Upload dashboard artifact (private)
+      - name: Upload dashboard artifact
         uses: actions/upload-artifact@v4
         with:
           name: chart-patterns-dashboard
