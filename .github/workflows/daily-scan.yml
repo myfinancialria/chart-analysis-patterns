@@ -7,7 +7,7 @@ on:
   workflow_dispatch: {}
   push:
     paths:
-      - ".github/workflows/daily-scan.yml"
+      - ".github/workflows/daily-scan.yml"\n      - "scan.py"
 
 permissions:
   contents: write
