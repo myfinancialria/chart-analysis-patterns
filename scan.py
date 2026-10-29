@@ -114,19 +114,24 @@ def fetch_history(symbols: list[str], days: int) -> pd.DataFrame:
             return None, (
                 f"status={resp.get('s')!r} code={resp.get('code')!r} "
                 f"message={resp.get('message')!r}"
-            )
+            ), resp.get("code")
         df = pd.DataFrame(resp["candles"],
                           columns=["ts", "open", "high", "low", "close", "volume"])
         df["symbol"] = sym
         df["date"] = (pd.to_datetime(df["ts"], unit="s", utc=True)
                       .dt.tz_convert("Asia/Kolkata").dt.strftime("%Y-%m-%d"))
-        return df[["date", "symbol", "open", "high", "low", "close", "volume"]], None
+        return df[["date", "symbol", "open", "high", "low", "close", "volume"]], None, None
 
     def fetch_pass(syms: list[str], label: str):
         rows, failed, reasons = [], [], []
         for i, sym in enumerate(syms, 1):
             try:
-                df, reason = fetch_one(sym)
+                df, reason, code = fetch_one(sym)
+                if code == -360:
+                    raise SystemExit(
+                        "Fyers daily request quota exhausted (error -360); "
+                        "stopping without a pointless full retry."
+                    )
                 if df is not None:
                     rows.append(df)
                 else:
