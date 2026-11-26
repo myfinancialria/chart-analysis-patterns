@@ -89,7 +89,7 @@ open docs/index.html                         # view locally
 
 ### Cloud refresh (GitHub Actions)
 
-`.github/workflows/daily-scan.yml` runs every weekday at **16:30 IST**: it mints a
+`.github/workflows/daily-scan.yml` runs every weekday at **19:00 IST**: it mints a
 fresh Fyers token from repo secrets (via `auto_login.py`), runs the scan, rebuilds
 `docs/`, commits it back, and uploads the dashboard as a private build artifact.
 
