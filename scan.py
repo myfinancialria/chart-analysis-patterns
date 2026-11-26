@@ -97,8 +97,9 @@ def fetch_history(symbols: list[str], days: int) -> pd.DataFrame:
     days = min(days, 365)  # Fyers caps daily-resolution history at ~366 days/request
     end_dt = date.today()
     start_dt = end_dt - timedelta(days=days)
-    # Fyers data API limit is ~200 req/min — throttle to ~170/min with margin.
-    THROTTLE = 0.36  # stay below Fyers history API rate limits
+    # Fyers started returning -360 after ~50 requests at the previous pace in CI.
+    # Keep well below that observed limit; 2.1s between calls is about 29/min.
+    THROTTLE = 2.1
 
     def fetch_one(sym: str):
         payload = {
@@ -129,8 +130,8 @@ def fetch_history(symbols: list[str], days: int) -> pd.DataFrame:
                 df, reason, code = fetch_one(sym)
                 if code == -360:
                     raise SystemExit(
-                        "Fyers daily request quota exhausted (error -360); "
-                        "stopping without a pointless full retry."
+                        "Fyers API request limit reached (error -360); "
+                        "the scan stopped to avoid wasting the remaining calls."
                     )
                 if df is not None:
                     rows.append(df)
