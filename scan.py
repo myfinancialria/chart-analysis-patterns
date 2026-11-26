@@ -129,10 +129,15 @@ def fetch_history(symbols: list[str], days: int) -> pd.DataFrame:
             try:
                 df, reason, code = fetch_one(sym)
                 if code == -360:
-                    raise SystemExit(
-                        "Fyers API request limit reached (error -360); "
-                        "the scan stopped to avoid wasting the remaining calls."
-                    )
+                    print(f"  Fyers rate-limit response: {reason}")
+                    print("  Waiting 65 seconds, then retrying once.")
+                    time.sleep(65)
+                    df, reason, code = fetch_one(sym)
+                    if code == -360:
+                        raise SystemExit(
+                            "Fyers API request limit persists after one 65-second "
+                            f"backoff (error -360): {reason}"
+                        )
                 if df is not None:
                     rows.append(df)
                 else:
